@@ -134,7 +134,7 @@ class ObjectBagPipeline:
         )
         sam = SamSegmenter(self.config.segmentation)
         seed_mask = sam.predict(seed_image, self.target, self.target.center_point)
-        self._save_mask(seed, seed_image, seed_mask)
+        self._save_mask(seed, seed_image, seed_mask, self.config.segmentation.mask_dilate_px)
 
         self._segment_direction(sam, seed + 1, len(self.image_paths), 1, seed)
         self._segment_direction(sam, seed - 1, -1, -1, seed)
@@ -156,18 +156,36 @@ class ObjectBagPipeline:
             if use_sam:
                 try:
                     prompt_point = mask_centroid(propagated) if self.target.mode == "one" else None
-                    mask = sam.predict(image, self.target, prompt_point or point)
+                    sam_mask = sam.predict(image, self.target, prompt_point or point)
+                    mask = self._constrain_sam_mask(sam_mask, propagated)
                 except Exception as error:
                     print(f"\nWarning: SAM failed at frame {index}, using optical flow: {error}")
                     mask = propagated
             else:
                 mask = propagated
-            self._save_mask(index, image, mask)
+            dilate_px = (
+                self.config.segmentation.mask_dilate_px
+                if use_sam
+                else self.config.segmentation.flow_mask_dilate_px
+            )
+            self._save_mask(index, image, mask, dilate_px)
             previous_image, previous_mask = image, self._load_mask(index)
             point = mask_centroid(previous_mask) or point
 
-    def _save_mask(self, index: int, image: np.ndarray, mask: np.ndarray) -> None:
-        mask = postprocess_mask(mask, self.config.segmentation.mask_dilate_px)
+    def _constrain_sam_mask(self, sam_mask: np.ndarray, flow_prior: np.ndarray) -> np.ndarray:
+        margin = self.config.segmentation.sam_refine_margin_px
+        if margin <= 0 or not flow_prior.any():
+            return sam_mask
+        size = 2 * margin + 1
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
+        prior_band = cv2.dilate(flow_prior.astype(np.uint8), kernel).astype(bool)
+        constrained = sam_mask & prior_band
+        if int(constrained.sum()) >= self.config.segmentation.min_mask_area_px:
+            return constrained
+        return flow_prior
+
+    def _save_mask(self, index: int, image: np.ndarray, mask: np.ndarray, dilate_px: int) -> None:
+        mask = postprocess_mask(mask, dilate_px)
         path = self.masks_dir / f"{index:06d}.png"
         if not cv2.imwrite(str(path), mask.astype(np.uint8) * 255):
             raise RuntimeError(f"Failed to save mask: {path}")

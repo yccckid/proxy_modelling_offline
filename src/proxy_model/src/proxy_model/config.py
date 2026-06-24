@@ -60,6 +60,8 @@ class Segmentation:
     device: str = "cuda"
     confidence_threshold: float = 0.3
     mask_dilate_px: int = 2
+    flow_mask_dilate_px: int = 0
+    sam_refine_margin_px: int = 12
     min_mask_area_px: int = 100
     qwen: Qwen = field(default_factory=Qwen)
 
@@ -147,6 +149,8 @@ def load_config(path: str | Path) -> AppConfig:
             device=str(seg_raw.get("device", "cuda")),
             confidence_threshold=float(seg_raw.get("confidence_threshold", 0.3)),
             mask_dilate_px=max(0, int(seg_raw.get("mask_dilate_px", 2))),
+            flow_mask_dilate_px=max(0, int(seg_raw.get("flow_mask_dilate_px", 0))),
+            sam_refine_margin_px=max(0, int(seg_raw.get("sam_refine_margin_px", 12))),
             min_mask_area_px=max(1, int(seg_raw.get("min_mask_area_px", 100))),
             qwen=Qwen(
                 enabled=bool(qwen_raw.get("enabled", True)),

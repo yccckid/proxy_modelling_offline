@@ -20,7 +20,7 @@ camera:
   distortion: [-0.08469119792190298, 0.13301102580164631, 0.00012196606307049965, 0.0031281992500534028, 0.034877906107274127]
 
 segmentation:
-  prompt: "分割出黑色的行李箱"
+  prompt: "分割出黑色行李箱"
   seed_frame: 0
   sam_interval: 3
   sam_agent_root: /home/yc/SAM-AGENT
@@ -28,6 +28,8 @@ segmentation:
   device: cuda
   confidence_threshold: 0.3
   mask_dilate_px: 2
+  flow_mask_dilate_px: 0
+  sam_refine_margin_px: 12
   min_mask_area_px: 100
   qwen:
     enabled: true
