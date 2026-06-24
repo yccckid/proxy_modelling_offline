@@ -1,0 +1,22 @@
+numpy>=1.26,<2.0
+opencv-python-headless>=4.8,<4.12
+Pillow>=10
+PyYAML>=6
+tqdm>=4.60
+openai>=1.30,<2
+httpx<0.28
+pycryptodomex>=3.20
+timm>=1.0.17
+ftfy==6.1.1
+regex
+iopath>=0.1.10
+huggingface_hub
+einops
+python-gnupg
+pycocotools
+rospkg
+catkin-pkg
+psutil
+
+# SAM 3 is loaded from /home/yc/SAM-AGENT/sam3_src by default.
+# Its own dependencies (including torch) must be installed in this environment.

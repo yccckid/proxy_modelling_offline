@@ -1,0 +1,57 @@
+input_bag: ../../GS-SDF/data/my_bag/my_data_0621.bag
+output_bag: ../../GS-SDF/data/my_bag/my_data_0621_object.bag
+
+topics:
+  image: /origin_img/compressed
+  image_pose: /aft_mapped_to_init_cam
+  pointcloud: /cloud_registered_body
+  pointcloud_pose: /aft_mapped_to_init_lidar
+
+# These must describe the original images in the input bag. Replace distortion
+# values with the same calibration used by rosbag_to_colmap.py.
+camera:
+  width: 1280
+  height: 1024
+  fx: 1294.2997611696601
+  fy: 1293.8035067346466
+  cx: 625.69717868846817
+  cy: 499.69240629695406
+  distortion_model: pinhole
+  distortion: [-0.08469119792190298, 0.13301102580164631, 0.00012196606307049965, 0.0031281992500534028, 0.034877906107274127]
+
+segmentation:
+  prompt: "分割出黑色的行李箱"
+  seed_frame: 0
+  sam_interval: 3
+  sam_agent_root: /home/yc/SAM-AGENT
+  checkpoint: /home/yc/SAM-AGENT/weights/sam3.pt
+  device: cuda
+  confidence_threshold: 0.3
+  mask_dilate_px: 2
+  min_mask_area_px: 100
+  qwen:
+    enabled: true
+    model: qwen3-vl-plus
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    api_key_env: DASHSCOPE_API_KEY
+    timeout_s: 60
+    max_retries: 2
+    image_max_side: 1280
+    # For fully offline runs, set enabled=false and fill these fields:
+    label: ""
+    mode: one
+    center_point: null
+
+point_filter:
+  min_depth_m: 0.05
+  max_depth_m: 100.0
+  pixel_stride: 2
+  depth_tolerance_m: 0.15
+  time_tolerance_s: 0.02
+
+output:
+  cache_dir: ../../../.proxy_model_cache/my_data_0621
+  jpeg_quality: 95
+  save_masks: true
+  save_overlays: true
+  overwrite: true
