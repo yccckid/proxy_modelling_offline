@@ -34,6 +34,7 @@ struct Colmap : DataParser {
     color_pose_path_ = config.color_pose_path;
     depth_path_ = config.depth_path;
     depth_pose_path_ = config.depth_pose_path;
+    mask_path_ = config.mask_path;
     mask_file_ = dataset_path_ / "images/right_undistorded_mask.jpg";
 
     depth_type_ = config.depth_type;
@@ -106,6 +107,8 @@ struct Colmap : DataParser {
     load_colors(color_type_, "", false, true);
     std::cout << "Loaded " << raw_color_filelists_.size() << " color images\n";
     TORCH_CHECK(color_poses_.size(0) == raw_color_filelists_.size());
+
+    load_masks(".png", "", true);
 
     if (std::filesystem::exists(mask_file_)) {
       mask = get_color_image(mask_file_, 0) > 0;

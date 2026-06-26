@@ -42,6 +42,8 @@ near: 0.05
 far: 300
 depth_type: 0 # 0: mean depth (unbounded scene); 1: median depth (bounded scene) 
 render_normal_weight: 0.01 # if you got not algined depth and color, please turn on render regularization
+mask_alpha_weight: 0.05 # penalize rendered opacity outside foreground masks; 0 disables
+mask_prune_ratio: 0.9 # prune Gaussians whose multi-view foreground hit ratio is below this; 0 disables
 isotropic_weight: 0.05 # isotropic regularization, only for 2DGS
 gs_sdf_weight: 1e-3 # equal to 3d sdf normal; need to space to blending layer element, so not too large
 detach_sdf_grad: 0 # 0: disable; 1: enable # if you got accurate depth sensing, you can enable this to accelerate the training process; otherwise it might degenerate the results; and to reproduce paper results, set it to 1

@@ -49,6 +49,7 @@ extern float k_sdf_weight, k_eikonal_weight, k_curvate_weight, k_rgb_weight,
     k_dssim_weight, k_isotropic_weight;
 extern float k_res_scale;
 extern float k_gs_sdf_weight, k_render_normal_weight, k_align_weight;
+extern float k_mask_alpha_weight, k_mask_prune_ratio;
 extern bool k_detach_sdf_grad;
 extern float k_visible_thr;
 

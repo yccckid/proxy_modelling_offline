@@ -36,6 +36,9 @@ DataConfig read_params(const std::filesystem::path &_dataset_path,
   if (!fsSettings["camera_path"].empty()) {
     config.camera_path = _dataset_path / std::string(fsSettings["camera_path"]);
   }
+  if (!fsSettings["mask_path"].empty()) {
+    config.mask_path = _dataset_path / std::string(fsSettings["mask_path"]);
+  }
 
   return config;
 }
@@ -382,6 +385,38 @@ torch::Tensor DataParser::get_color_image(const std::string &file_path,
     return {};
   }
   return cv_mat_to_tensor(color_mat, scale);
+}
+
+torch::Tensor DataParser::get_mask(const int &idx, const int &image_type,
+                                   const torch::Device &_device) const {
+  if (raw_mask_filelists_.empty()) {
+    return torch::Tensor();
+  }
+  int raw_idx = idx;
+  if (image_type == DataType::TrainColor) {
+    raw_idx = train_to_raw_map_ids_[idx];
+  }
+  if (raw_idx < 0 || raw_idx >= raw_mask_filelists_.size()) {
+    return torch::Tensor();
+  }
+  cv::Mat mask_mat = cv::imread(raw_mask_filelists_[raw_idx], cv::IMREAD_GRAYSCALE);
+  if (mask_mat.empty()) {
+    return torch::Tensor();
+  }
+  cv::resize(mask_mat, mask_mat,
+             cv::Size(sensor_.camera.width, sensor_.camera.height),
+             0, 0, cv::INTER_NEAREST);
+  cv::threshold(mask_mat, mask_mat, 127, 1, cv::THRESH_BINARY);
+  mask_mat.convertTo(mask_mat, CV_32FC1);
+  if (!mask_mat.isContinuous()) {
+    mask_mat = mask_mat.clone();
+  }
+  return torch::from_blob(mask_mat.data,
+                          {(int)sensor_.camera.height,
+                           (int)sensor_.camera.width, 1},
+                          torch::kFloat32)
+      .clone()
+      .to(_device);
 }
 
 cv::Mat DataParser::get_image_cv_mat(const std::string &file_path,
@@ -860,6 +895,43 @@ void DataParser::load_colors(const std::string &file_extension,
     load_file_list(eval_color_path_, eval_color_filelists_, prefix,
                    file_extension);
   }
+}
+
+void DataParser::load_masks(const std::string &file_extension,
+                            const std::string &prefix, const bool &llff) {
+  if (mask_path_.empty()) {
+    return;
+  }
+  if (!raw_mask_filelists_.empty()) {
+    return;
+  }
+  if (!std::filesystem::exists(mask_path_)) {
+    return;
+  }
+  load_file_list(mask_path_, raw_mask_filelists_, prefix, file_extension);
+  if (raw_mask_filelists_.size() != raw_color_filelists_.size()) {
+    std::cerr << "Warning: masks count (" << raw_mask_filelists_.size()
+              << ") != images count (" << raw_color_filelists_.size()
+              << "), disabling per-frame masks.\n";
+    raw_mask_filelists_.clear();
+    return;
+  }
+  if (!preload_) {
+    return;
+  }
+  train_masks_ = torch::zeros({(int)train_to_raw_map_ids_.size(),
+                               (int)sensor_.camera.height,
+                               (int)sensor_.camera.width, 1});
+#pragma omp parallel for
+  for (int i = 0; i < raw_mask_filelists_.size(); i++) {
+    if (llff && ((i + 1) % 8 == 0)) {
+      continue;
+    }
+    int train_idx = llff ? i - i / 8 : i;
+    train_masks_.index_put_(
+        {train_idx}, get_mask(train_idx, DataType::TrainColor, torch::kCPU));
+  }
+  std::cout << "Loaded " << raw_mask_filelists_.size() << " masks\n";
 }
 
 void DataParser::load_depths(const DepthType& depth_type,

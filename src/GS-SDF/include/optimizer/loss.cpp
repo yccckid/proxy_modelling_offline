@@ -22,7 +22,8 @@ torch::Tensor gs_sdf_normal_loss(const torch::Tensor &gs_normal,
 torch::Tensor rgb_loss(const torch::Tensor &rgb, const torch::Tensor &rgb_gt,
                        const torch::Tensor &mask) {
   if (mask.defined()) {
-    return torch::abs((rgb - rgb_gt) * mask).mean();
+    return torch::abs((rgb - rgb_gt) * mask).sum() /
+           mask.sum().clamp_min(1.0f) / rgb.size(-1);
   }
 
   // return torch::sqrt((rgb - rgb_gt).square() + 1e-4f).mean();

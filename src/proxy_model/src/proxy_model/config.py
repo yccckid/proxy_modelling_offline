@@ -13,6 +13,7 @@ class Topics:
     image_pose: str
     pointcloud: str
     pointcloud_pose: str
+    mask: str = "/proxy_model/object_mask"
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,9 @@ class PointFilter:
     pixel_stride: int = 2
     depth_tolerance_m: float = 0.15
     time_tolerance_s: float = 0.02
+    multiview_window: int = 2
+    multiview_min_views: int = 2
+    multiview_ratio: float = 0.9
 
 
 @dataclass(frozen=True)
@@ -129,6 +133,7 @@ def load_config(path: str | Path) -> AppConfig:
             image_pose=_required(topics_raw, "image_pose"),
             pointcloud=_required(topics_raw, "pointcloud"),
             pointcloud_pose=_required(topics_raw, "pointcloud_pose"),
+            mask=str(topics_raw.get("mask", "/proxy_model/object_mask")),
         ),
         camera=Camera(
             width=int(_required(camera_raw, "width")),
@@ -176,6 +181,9 @@ def load_config(path: str | Path) -> AppConfig:
             pixel_stride=max(1, int(point_raw.get("pixel_stride", 2))),
             depth_tolerance_m=max(0.0, float(point_raw.get("depth_tolerance_m", 0.15))),
             time_tolerance_s=max(0.0, float(point_raw.get("time_tolerance_s", 0.02))),
+            multiview_window=max(0, int(point_raw.get("multiview_window", 2))),
+            multiview_min_views=max(1, int(point_raw.get("multiview_min_views", 2))),
+            multiview_ratio=min(1.0, max(0.0, float(point_raw.get("multiview_ratio", 0.9)))),
         ),
         output=Output(
             cache_dir=resolve(output_raw.get("cache_dir", ".proxy_model_cache")),

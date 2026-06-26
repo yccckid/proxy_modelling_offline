@@ -13,11 +13,13 @@ from tqdm import tqdm
 
 from .config import AppConfig
 from .geometry import lidar_to_camera, points_in_mask
+from .geometry import points_mask_consistency, pose_matrix
 from .qwen import Target, resolve_target
 from .ros_utils import (
     TimedMessage,
     apply_mask,
     decode_image,
+    encode_mask_image,
     encode_masked_image,
     filter_pointcloud,
     mask_overlay,
@@ -231,13 +233,15 @@ class ObjectBagPipeline:
                     index = self._image_index(message_stamp_ns(message, bag_time))
                     if index is None:
                         raise RuntimeError("Could not match image message to cached frame")
+                    mask = self._load_mask(index)
                     image = decode_image(message)
                     output_message = encode_masked_image(
                         message,
-                        apply_mask(image, self._load_mask(index)),
+                        apply_mask(image, mask),
                         self.config.output.jpeg_quality,
                     )
                     destination.write(topic, output_message, bag_time)
+                    destination.write(topics.mask, encode_mask_image(message, mask), bag_time)
                     image_count += 1
                     continue
 
@@ -267,6 +271,7 @@ class ObjectBagPipeline:
                             self.config.camera,
                             self.config.point_filter,
                         )
+                        keep &= self._multiview_keep(points, index, lidar_pose.message)
                     output_points += int(keep.sum())
                     destination.write(topic, filter_pointcloud(message, keep), bag_time)
                     point_count += 1
@@ -276,8 +281,31 @@ class ObjectBagPipeline:
 
         return {
             "images": image_count,
+            "masks": image_count,
             "pointclouds": point_count,
             "input_points": input_points,
             "output_points": output_points,
             "unmatched_points_removed": unmatched_points,
         }
+
+    def _multiview_keep(self, points: np.ndarray, image_index: int, lidar_pose: object) -> np.ndarray:
+        options = self.config.point_filter
+        if options.multiview_window <= 0:
+            return np.ones(len(points), dtype=bool)
+
+        begin = max(0, image_index - options.multiview_window)
+        end = min(len(self.image_paths), image_index + options.multiview_window + 1)
+        transform_world_lidar = pose_matrix(lidar_pose)
+        transforms: list[np.ndarray] = []
+        masks: list[np.ndarray] = []
+        for view_index in range(begin, end):
+            camera_pose = nearest(
+                self.camera_poses,
+                self.image_stamps[view_index],
+                self.config.point_filter.time_tolerance_s,
+            )
+            if camera_pose is None:
+                continue
+            transforms.append(np.linalg.inv(pose_matrix(camera_pose.message)) @ transform_world_lidar)
+            masks.append(self._load_mask(view_index))
+        return points_mask_consistency(points, transforms, masks, self.config.camera, options)

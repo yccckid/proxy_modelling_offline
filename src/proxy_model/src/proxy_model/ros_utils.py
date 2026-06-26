@@ -72,6 +72,15 @@ def encode_masked_image(message: object, image_bgr: np.ndarray, quality: int) ->
     raise TypeError(f"Unsupported image message type: {msg_type}")
 
 
+def encode_mask_image(reference: object, mask: np.ndarray) -> object:
+    from cv_bridge import CvBridge
+
+    image = (mask.astype(np.uint8) * 255)
+    message = CvBridge().cv2_to_imgmsg(image, encoding="mono8")
+    message.header = copy.deepcopy(reference.header)
+    return message
+
+
 def xyz_view(message: object) -> np.ndarray:
     offsets = {field.name: field.offset for field in message.fields}
     missing = {"x", "y", "z"} - offsets.keys()

@@ -38,7 +38,7 @@ void load_file_list(const std::string &dir_path,
 
 struct DataConfig {
   std::filesystem::path color_path, color_pose_path, depth_path,
-      depth_pose_path, camera_path;
+      depth_pose_path, camera_path, mask_path;
   std::string color_type = ".jpg"; // default color type
   DepthType depth_type;
   int color_pose_type, depth_pose_type;
@@ -69,7 +69,7 @@ struct DataParser {
 
   std::filesystem::path dataset_path_, dataset_name_;
   std::filesystem::path color_pose_path_, calib_path_, color_path_, depth_path_,
-      camera_path_;
+      camera_path_, mask_path_;
 
   std::filesystem::path eval_pose_path_, eval_color_path_, eval_depth_path_;
 
@@ -94,7 +94,8 @@ struct DataParser {
   torch::Tensor T_S_B_;
 
   std::vector<std::filesystem::path> raw_color_filelists_, raw_depth_filelists_,
-      train_depth_filelists_, eval_color_filelists_, eval_depth_filelists_;
+      raw_mask_filelists_, train_depth_filelists_, eval_color_filelists_,
+      eval_depth_filelists_;
   std::vector<int> color_camera_ids_, train_to_raw_map_ids_,
       eval_to_raw_map_ids_;
 
@@ -105,6 +106,7 @@ struct DataParser {
   int ds_pt_num_;
 
   torch::Tensor mask = torch::Tensor();
+  torch::Tensor train_masks_ = torch::Tensor(); // [N, H, W, 1]
 
   virtual sensor::Cameras get_camera(const int &idx,
                                      const int &pose_type) const;
@@ -121,6 +123,8 @@ struct DataParser {
   virtual torch::Tensor get_color_image(const std::string &file_path,
                                         const int &image_type,
                                         const float &scale = 1.0) const;
+  virtual torch::Tensor get_mask(const int &idx, const int &image_type,
+                                 const torch::Device &_device) const;
   virtual torch::Tensor cv_mat_to_tensor(cv::Mat color_mat,
                                          const float &scale) const;
 
@@ -231,6 +235,9 @@ struct DataParser {
   virtual void load_colors(const std::string &file_extension,
                            const std::string &prefix = "",
                            const bool eval = false, const bool &llff = false);
+  virtual void load_masks(const std::string &file_extension = ".png",
+                          const std::string &prefix = "",
+                          const bool &llff = false);
 
   virtual void load_depths(const DepthType& depth_type,
                            const std::string &prefix = "",

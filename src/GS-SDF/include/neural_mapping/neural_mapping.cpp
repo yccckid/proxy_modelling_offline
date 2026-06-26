@@ -207,6 +207,7 @@ NeuralSLAM::gs_train_batch_iter(const int &iter, const bool &opt_struct) {
   }
 
   auto img_idx = train_cameras_idx[iter % train_num];
+  int img_idx_int = img_idx.item<int>();
 
   // [3, 4]
   auto gt_color = data_loader_ptr->dataparser_ptr_
@@ -219,7 +220,7 @@ NeuralSLAM::gs_train_batch_iter(const int &iter, const bool &opt_struct) {
   static auto p_t_render = llog::CreateTimer("   render");
   p_t_render->tic();
   auto render_results =
-      render_image(img_idx.item<int>(), dataparser::DataType::TrainColor);
+      render_image(img_idx_int, dataparser::DataType::TrainColor);
   p_t_render->toc_sum();
 
   static auto p_t_loss = llog::CreateTimer("   loss");
@@ -227,7 +228,15 @@ NeuralSLAM::gs_train_batch_iter(const int &iter, const bool &opt_struct) {
   auto render_color = render_results["color"]; // dont clamp in training
 
   torch::Tensor mask;
-  if (data_loader_ptr->dataparser_ptr_->mask.defined()) {
+  if (data_loader_ptr->dataparser_ptr_->train_masks_.defined()) {
+    mask = data_loader_ptr->dataparser_ptr_->train_masks_
+               .index({img_idx_int})
+               .to(render_color.device());
+  } else {
+    mask = data_loader_ptr->dataparser_ptr_->get_mask(
+        img_idx_int, dataparser::DataType::TrainColor, render_color.device());
+  }
+  if (!mask.defined() && data_loader_ptr->dataparser_ptr_->mask.defined()) {
     mask = data_loader_ptr->dataparser_ptr_->mask.to(render_color.device());
   }
 
@@ -235,6 +244,13 @@ NeuralSLAM::gs_train_batch_iter(const int &iter, const bool &opt_struct) {
   gs_loss += k_rgb_weight * color_loss;
   dssim_loss = loss::dssim_loss(render_color, gt_color, mask);
   gs_loss += k_dssim_weight * dssim_loss;
+  if (mask.defined() && k_mask_alpha_weight > 0.0f) {
+    auto render_alpha = render_results["alpha"][0];
+    auto background_alpha_loss =
+        (render_alpha * (1.0f - mask)).sum() / (1.0f - mask).sum().clamp_min(1.0f);
+    gs_loss += k_mask_alpha_weight * background_alpha_loss;
+    llog::RecordValue("bg_alpha", background_alpha_loss.item<float>(), true);
+  }
   p_t_loss->toc_sum();
 
   if (opt_struct) {
@@ -252,12 +268,22 @@ NeuralSLAM::gs_train_batch_iter(const int &iter, const bool &opt_struct) {
           render_results["color_pose"], render_depth);
 
       auto render_alpha = render_results["alpha"][0].detach();
+      if (mask.defined()) {
+        render_alpha = render_alpha * mask;
+      }
       depth_normal = depth_normal * render_alpha;
 
       auto render_normal = render_results["render_normal"][0];
-      normal_error = (render_alpha.square().squeeze(-1) -
-                      (depth_normal * render_normal).sum(-1).nan_to_num())
-                         .mean();
+      auto normal_residual =
+          (render_alpha.square().squeeze(-1) -
+           (depth_normal * render_normal).sum(-1).nan_to_num())
+              .abs();
+      if (mask.defined()) {
+        normal_error =
+            (normal_residual * mask.squeeze(-1)).sum() / mask.sum().clamp_min(1.0f);
+      } else {
+        normal_error = normal_residual.mean();
+      }
       gs_loss += k_render_normal_weight * normal_error;
     }
   }
@@ -482,6 +508,10 @@ void NeuralSLAM::gs_train(int _opt_iter) {
     p_t_cbk_gs->tic();
     neural_gs_ptr->train_callback(i, k_gs_iter_step, p_optimizer_,
                                   render_results);
+    if ((k_mask_prune_ratio > 0.0f) && (i > k_refine_start_iter) &&
+        (i % k_refine_every == 0)) {
+      mask_prune_gaussians(i);
+    }
     p_t_cbk_gs->toc_sum();
 
     if (i % k_export_interval == 0) {
@@ -525,6 +555,77 @@ void NeuralSLAM::gs_train(int _opt_iter) {
     }
   }
   // end();
+}
+
+void NeuralSLAM::mask_prune_gaussians(const int &iter) {
+  auto parser = data_loader_ptr->dataparser_ptr_;
+  bool has_masks = parser->train_masks_.defined() || !parser->raw_mask_filelists_.empty();
+  if (!has_masks) {
+    return;
+  }
+
+  torch::NoGradGuard no_grad;
+  auto xyz = neural_gs_ptr->get_xyz().detach().to(k_device);
+  int n = xyz.size(0);
+  if (n == 0) {
+    return;
+  }
+
+  auto visible = torch::zeros({n}, torch::TensorOptions().device(k_device).dtype(torch::kFloat32));
+  auto in_mask = torch::zeros_like(visible);
+  int train_num = parser->size(dataparser::DataType::TrainColor);
+  int frame_step = std::max(1, train_num / 64);
+
+  for (int i = 0; i < train_num; i += frame_step) {
+    auto pose = data_loader_ptr->get_pose(i, dataparser::DataType::TrainColor)
+                    .to(k_device);
+    auto rot = pose.slice(1, 0, 3);
+    auto pos = pose.slice(1, 3, 4).squeeze();
+    auto p_cam = (xyz - pos).mm(rot);
+    auto z = p_cam.index({torch::indexing::Slice(), 2});
+    auto valid = z > k_near;
+
+    auto camera = parser->get_camera(i, dataparser::DataType::TrainColor);
+    auto u = (p_cam.index({torch::indexing::Slice(), 0}) / z * camera.fx +
+              camera.cx)
+                 .round()
+                 .to(torch::kLong);
+    auto v = (p_cam.index({torch::indexing::Slice(), 1}) / z * camera.fy +
+              camera.cy)
+                 .round()
+                 .to(torch::kLong);
+    valid = valid & (u >= 0) & (u < camera.width) & (v >= 0) & (v < camera.height);
+    if (valid.sum().item<int>() == 0) {
+      continue;
+    }
+
+    torch::Tensor mask;
+    if (parser->train_masks_.defined()) {
+      mask = parser->train_masks_.index({i}).to(k_device);
+    } else {
+      mask = parser->get_mask(i, dataparser::DataType::TrainColor, k_device);
+    }
+    if (!mask.defined()) {
+      continue;
+    }
+    auto flat_mask = mask.view({-1});
+    auto flat_idx = (v.clamp(0, camera.height - 1) * camera.width +
+                     u.clamp(0, camera.width - 1))
+                        .to(torch::kLong);
+    auto hit = flat_mask.index_select(0, flat_idx) > 0.5f;
+    visible += valid.to(torch::kFloat32);
+    in_mask += (valid & hit).to(torch::kFloat32);
+  }
+
+  auto enough_views = visible >= 2.0f;
+  auto ratio = in_mask / visible.clamp_min(1.0f);
+  auto is_prune = enough_views & (ratio < k_mask_prune_ratio);
+  int n_pruned = neural_gs_ptr->prune_gs(p_optimizer_, is_prune);
+  if (n_pruned > 0) {
+    std::cout << "\nMask-pruned " << n_pruned << " Gaussian(s) at iter "
+              << iter << "; ";
+    llog::RecordValue("mask_prune", n_pruned);
+  }
 }
 
 void NeuralSLAM::sdf_train_callback(const int &_iter, const int &_total_iter,

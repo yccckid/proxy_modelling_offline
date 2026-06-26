@@ -89,6 +89,7 @@ public:
 
   void nsdf_train(int _opt_iter);
   void gs_train(int _opt_iter);
+  void mask_prune_gaussians(const int &iter);
 
   void sdf_train_callback(const int &_opt_iter, const int &_total_iter,
                           const RaySamples &point_samples,

@@ -55,6 +55,7 @@ float k_bce_sigma, k_bce_isigma, k_truncated_dis;
 float k_sdf_weight, k_eikonal_weight, k_curvate_weight, k_rgb_weight,
     k_dssim_weight, k_isotropic_weight;
 float k_gs_sdf_weight, k_render_normal_weight, k_align_weight;
+float k_mask_alpha_weight = 0.0f, k_mask_prune_ratio = 0.0f;
 float k_res_scale;
 bool k_detach_sdf_grad;
 float k_visible_thr;
@@ -389,6 +390,12 @@ void read_base_params(const std::filesystem::path &_base_config_path,
   fsSettings["rgb_weight"] >> k_rgb_weight;
   fsSettings["dssim_weight"] >> k_dssim_weight;
   fsSettings["render_normal_weight"] >> k_render_normal_weight;
+  if (!fsSettings["mask_alpha_weight"].empty()) {
+    fsSettings["mask_alpha_weight"] >> k_mask_alpha_weight;
+  }
+  if (!fsSettings["mask_prune_ratio"].empty()) {
+    fsSettings["mask_prune_ratio"] >> k_mask_prune_ratio;
+  }
   fsSettings["isotropic_weight"] >> k_isotropic_weight;
 
   fsSettings["numerical_grad"] >> k_numerical_grad;

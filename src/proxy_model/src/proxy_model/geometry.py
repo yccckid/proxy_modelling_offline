@@ -99,3 +99,80 @@ def points_in_mask(
     near_surface = depth <= nearest_depth[cell_id] + options.depth_tolerance_m
     keep[source_indices[near_surface]] = True
     return keep
+
+
+def project_points(
+    points_lidar: np.ndarray,
+    transform_camera_lidar: np.ndarray,
+    camera: Camera,
+    options: PointFilter,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    count = len(points_lidar)
+    valid_source = np.zeros(count, dtype=bool)
+    uv = np.zeros((count, 2), dtype=np.int64)
+    depth_all = np.full(count, np.inf, dtype=np.float64)
+
+    finite = np.isfinite(points_lidar).all(axis=1)
+    if not finite.any():
+        return valid_source, uv, depth_all
+
+    source_indices = np.flatnonzero(finite)
+    points = points_lidar[finite]
+    points_camera = (
+        transform_camera_lidar[:3, :3] @ points.T
+    ).T + transform_camera_lidar[:3, 3]
+    depth = points_camera[:, 2]
+    valid_depth = (depth >= options.min_depth_m) & (depth <= options.max_depth_m)
+    if not valid_depth.any():
+        return valid_source, uv, depth_all
+
+    source_indices = source_indices[valid_depth]
+    points_camera = points_camera[valid_depth]
+    depth = depth[valid_depth]
+    distortion = np.asarray(camera.distortion, dtype=np.float64)
+    if camera.distortion_model == "fisheye":
+        projected, _ = cv2.fisheye.projectPoints(
+            points_camera.reshape(-1, 1, 3),
+            np.zeros(3),
+            np.zeros(3),
+            camera.matrix,
+            distortion[:4],
+        )
+    else:
+        projected, _ = cv2.projectPoints(
+            points_camera,
+            np.zeros(3),
+            np.zeros(3),
+            camera.matrix,
+            distortion,
+        )
+    uv[source_indices] = np.rint(projected.reshape(-1, 2)).astype(np.int64)
+    depth_all[source_indices] = depth
+    valid_source[source_indices] = True
+    return valid_source, uv, depth_all
+
+
+def points_mask_consistency(
+    points_lidar: np.ndarray,
+    view_transforms: list[np.ndarray],
+    masks: list[np.ndarray],
+    camera: Camera,
+    options: PointFilter,
+) -> np.ndarray:
+    if not view_transforms or not masks:
+        return np.zeros(len(points_lidar), dtype=bool)
+
+    visible = np.zeros(len(points_lidar), dtype=np.int32)
+    hit = np.zeros(len(points_lidar), dtype=np.int32)
+    for transform, mask in zip(view_transforms, masks):
+        valid, uv, _ = project_points(points_lidar, transform, camera, options)
+        h, w = mask.shape
+        u, v = uv[:, 0], uv[:, 1]
+        inside = valid & (u >= 0) & (u < w) & (v >= 0) & (v < h)
+        visible += inside.astype(np.int32)
+        hit += (inside & mask[v.clip(0, h - 1), u.clip(0, w - 1)]).astype(np.int32)
+
+    enough_views = visible >= options.multiview_min_views
+    ratio = np.zeros(len(points_lidar), dtype=np.float32)
+    np.divide(hit, visible, out=ratio, where=visible > 0)
+    return enough_views & (ratio >= options.multiview_ratio)

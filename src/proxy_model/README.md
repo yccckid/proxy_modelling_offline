@@ -9,7 +9,8 @@
 3. SAM 3 在种子帧和周期关键帧上分割；关键帧之间使用稠密光流传播 mask。`sam_interval: 1` 表示每帧都用 SAM，精度最高。
 4. 图像 mask 外像素置黑。
 5. 使用逐帧 `inv(T_world_camera) @ T_world_lidar` 把点云投影到图像；仅保留 mask 内且接近该像素栅格最近深度的点。
-6. 第二遍按原始 bag 时间顺序写出。所有未处理话题逐消息原样复制。
+6. 对点云做轻量多视角一致性检查：同一个点在邻近多个视角中投影到前景 mask 的比例超过阈值才保留。
+7. 第二遍按原始 bag 时间顺序写出。所有未处理话题逐消息原样复制，并额外发布每帧 `mono8` mask topic。
 
 ## 环境
 
@@ -32,6 +33,8 @@ export DASHSCOPE_API_KEY="你的 key"
 - `segmentation.seed_frame`：目标清楚可见的帧号；不一定要设为 0。
 - `camera`：必须使用输入 bag 原始图像的内参和畸变参数，即此前传给 `rosbag_to_colmap.py` 的值。
 - `sam_interval`：建议先用 5；快速运动、遮挡或边界精度要求高时改为 1–3。
+- `topics.mask`：输出 bag 中的 mask 话题，默认 `/proxy_model/object_mask`。
+- `point_filter.multiview_ratio`：点云多视角 mask 命中比例阈值，默认 `0.9`。
 - `output.overwrite`：确认允许覆盖旧输出后才设为 `true`。
 
 可先关闭 Qwen 做离线调试：
@@ -65,6 +68,7 @@ python src/GS-SDF/scripts/rosbag_convert/rosbag_to_colmap.py \
   --bag_path src/GS-SDF/data/my_bag/my_data_0621_object.bag \
   --image_topic /origin_img/compressed \
   --image_pose_topic /aft_mapped_to_init_cam \
+  --mask_topic /proxy_model/object_mask \
   --point_topic /cloud_registered_body \
   --point_pose_topic /aft_mapped_to_init_lidar \
   --output_dir src/GS-SDF/data/my_data_0621_object_colmap \
@@ -75,3 +79,11 @@ python src/GS-SDF/scripts/rosbag_convert/rosbag_to_colmap.py \
 ```
 
 `--skip_point` 可确保转换脚本使用相同帧索引导出图像和点云。
+
+转换后会得到与 `images/`、`depths/` 平行的 `masks/` 文件夹。`src/GS-SDF/config/colmap/colmap_example.yaml` 已加入：
+
+```yaml
+mask_path: "masks"
+```
+
+GS-SDF 训练时会自动读取逐帧 mask，并把 RGB、DSSIM、normal 正则和背景 alpha 抑制限制到 mask 约束下。

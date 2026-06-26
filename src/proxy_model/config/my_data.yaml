@@ -6,6 +6,7 @@ topics:
   image_pose: /aft_mapped_to_init_cam
   pointcloud: /cloud_registered_body
   pointcloud_pose: /aft_mapped_to_init_lidar
+  mask: /proxy_model/object_mask
 
 # These must describe the original images in the input bag. Replace distortion
 # values with the same calibration used by rosbag_to_colmap.py.
@@ -50,6 +51,9 @@ point_filter:
   pixel_stride: 2
   depth_tolerance_m: 0.15
   time_tolerance_s: 0.02
+  multiview_window: 2
+  multiview_min_views: 2
+  multiview_ratio: 0.9
 
 output:
   cache_dir: ../../../.proxy_model_cache/my_data_0621

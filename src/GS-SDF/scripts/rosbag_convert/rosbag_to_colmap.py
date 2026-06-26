@@ -47,6 +47,10 @@ Output structure:
     │   ├── 00000.ply
     │   ├── 00001.ply
     │   └── ...
+    ├── masks/                  # optional, if --mask_topic is provided
+    │   ├── 00000.png
+    │   ├── 00001.png
+    │   └── ...
     └── sparse/
         └── 0/
             ├── cameras.txt
@@ -447,11 +451,14 @@ def parse_rosbag(args):
     output_dir = Path(args.output_dir)
     images_dir = output_dir / "images"
     depths_dir = output_dir / "depths"
+    masks_dir = output_dir / "masks"
     sparse_dir = output_dir / "sparse" / "0"
 
     output_dir.mkdir(parents=True, exist_ok=True)
     images_dir.mkdir(exist_ok=True)
     depths_dir.mkdir(exist_ok=True)
+    if args.mask_topic:
+        masks_dir.mkdir(exist_ok=True)
     sparse_dir.mkdir(parents=True, exist_ok=True)
 
     # Camera intrinsic matrix (distorted)
@@ -533,6 +540,8 @@ def parse_rosbag(args):
     topics = [args.image_pose_topic, args.image_topic]
     if args.point_topic and args.point_pose_topic:
         topics.extend([args.point_pose_topic, args.point_topic])
+    if args.mask_topic:
+        topics.append(args.mask_topic)
 
     # First pass: collect all messages
     print("First pass: collecting messages...")
@@ -540,6 +549,7 @@ def parse_rosbag(args):
     image_msgs = []
     point_pose_msgs = []
     point_msgs = []
+    mask_msgs = []
 
     bridge = CvBridge()
 
@@ -562,10 +572,13 @@ def parse_rosbag(args):
             point_pose_msgs.append((timestamp, msg))
         elif topic == args.point_topic:
             point_msgs.append((timestamp, msg))
+        elif topic == args.mask_topic:
+            mask_msgs.append((timestamp, msg))
 
     print(
         f"\nCollected: {len(image_pose_msgs)} image poses, {len(image_msgs)} images, "
-        f"{len(point_pose_msgs)} point poses, {len(point_msgs)} point clouds"
+        f"{len(point_pose_msgs)} point poses, {len(point_msgs)} point clouds, "
+        f"{len(mask_msgs)} masks"
     )
 
     # If point_pose_topic is same as image_pose_topic or empty, reuse image poses
@@ -628,6 +641,28 @@ def parse_rosbag(args):
             image = cv2.remap(image, map1, map2, cv2.INTER_LINEAR)
 
         return image, closest_pose, None
+
+    def get_processed_mask(idx):
+        if not args.mask_topic:
+            return None
+        if idx < 0 or idx >= len(image_msgs):
+            return None
+        ts, _ = image_msgs[idx]
+        closest = find_closest_pose(ts, mask_msgs, args.time_threshold)
+        if closest is None:
+            return None
+        msg = closest
+        if getattr(msg, "_type", "") == "sensor_msgs/CompressedImage":
+            mask = decode_compressed_image(msg)
+        else:
+            mask = bridge.imgmsg_to_cv2(msg, desired_encoding="mono8")
+        if mask is None:
+            return None
+        if mask.ndim == 3:
+            mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+        if need_undistort and map1 is not None and map2 is not None:
+            mask = cv2.remap(mask, map1, map2, cv2.INTER_NEAREST)
+        return (mask > 0).astype(np.uint8) * 255
 
     # Second pass: match images with poses and save
     # Strategy:
@@ -733,6 +768,12 @@ def parse_rosbag(args):
         # Save image (zero-padded filename)
         filename = f"{image_count:05d}.png"
         cv2.imwrite(str(images_dir / filename), candidate_image)
+        if args.mask_topic:
+            mask = get_processed_mask(candidate_idx)
+            if mask is None:
+                mask = np.ones(candidate_image.shape[:2], dtype=np.uint8) * 255
+                print(f"\nWarning: missing mask for image index {candidate_idx}; using all-foreground mask")
+            cv2.imwrite(str(masks_dir / filename), mask)
 
         # Update previous exported image for next PSNR comparison
         prev_exported_image = candidate_image.copy()
@@ -970,6 +1011,12 @@ Examples:
         type=str,
         default="",
         help="ROS topic for point cloud poses (optional, defaults to image_pose_topic)",
+    )
+    parser.add_argument(
+        "--mask_topic",
+        type=str,
+        default="",
+        help="ROS topic for per-image foreground masks; saves aligned PNGs to output_dir/masks",
     )
     parser.add_argument(
         "--skip_point",
