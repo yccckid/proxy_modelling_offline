@@ -620,7 +620,7 @@ void NeuralSLAM::mask_prune_gaussians(const int &iter) {
   auto enough_views = visible >= 2.0f;
   auto ratio = in_mask / visible.clamp_min(1.0f);
   auto is_prune = enough_views & (ratio < k_mask_prune_ratio);
-  int n_pruned = neural_gs_ptr->prune_gs(p_optimizer_, is_prune);
+  int n_pruned = neural_gs_ptr->prune_by_mask(p_optimizer_, is_prune);
   if (n_pruned > 0) {
     std::cout << "\nMask-pruned " << n_pruned << " Gaussian(s) at iter "
               << iter << "; ";

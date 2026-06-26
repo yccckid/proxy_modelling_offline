@@ -4,7 +4,8 @@ project(kaolin_wisp_cpp)
 find_package(Torch REQUIRED)
 
 # kaolin refer: kaolin/setup.py
-add_definitions(-O3 -DWITH_CUDA -DTHRUST_IGNORE_CUB_VERSION_CHECK)
+add_compile_options(-O3)
+add_definitions(-DWITH_CUDA -DTHRUST_IGNORE_CUB_VERSION_CHECK)
 include_directories(submodules/kaolin kaolin_wisp_cpp)
 
 file(

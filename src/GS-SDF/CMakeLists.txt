@@ -9,7 +9,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON) # for clangd
 # set(CMAKE_BUILD_TYPE "Release") set(CMAKE_BUILD_TYPE "Debug")
 set(CMAKE_CXX_FLAGS "-fPIC")
 
-add_definitions(-O3 -DWITH_CUDA -DTHRUST_IGNORE_CUB_VERSION_CHECK)
+add_compile_options(-O3)
+add_definitions(-DWITH_CUDA -DTHRUST_IGNORE_CUB_VERSION_CHECK)
 
 option(ENABLE_ROS "Enable ROS support" ON)
 
@@ -60,6 +61,14 @@ include_directories(submodules/llog/include)
 
 # 指定libTorch位置
 find_package(Torch REQUIRED)
+set(CMAKE_CUDA_ARCHITECTURES
+    86
+    CACHE STRING "CUDA architectures" FORCE)
+set(TCNN_CUDA_ARCHITECTURES
+    86
+    CACHE STRING "tiny-cuda-nn CUDA architectures" FORCE)
+set(CMAKE_CUDA_FLAGS "")
+set(CUDA_NVCC_FLAGS "")
 
 include_directories(${OpenCV_INCLUDE_DIRS} ${EIGEN3_INCLUDE_DIR}
                     ${PCL_INCLUDE_DIRS} include)

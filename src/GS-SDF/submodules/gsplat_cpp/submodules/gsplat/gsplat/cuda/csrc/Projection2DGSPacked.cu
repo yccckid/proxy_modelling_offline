@@ -432,7 +432,6 @@ __global__ void projection_2dgs_packed_bwd_kernel(
     );
     quat_to_rotmat_vjp(quat, v_R_gs, v_quat);
 
-    auto warp = cg::tiled_partition<32>(cg::this_thread_block());
     if (sparse_grad) {
         // write out results with sparse layout
         if (v_means != nullptr) {
@@ -452,50 +451,34 @@ __global__ void projection_2dgs_packed_bwd_kernel(
         v_scales[1] = v_scale[1];
     } else {
         // write out results with dense layout
-        // #if __CUDA_ARCH__ >= 700
-        // write out results with warp-level reduction
-        auto warp_group_g = cg::labeled_partition(warp, gid);
         if (v_means != nullptr) {
-            warpSum(v_mean, warp_group_g);
-            if (warp_group_g.thread_rank() == 0) {
-                v_means += gid * 3;
+            v_means += gid * 3;
 #pragma unroll
-                for (uint32_t i = 0; i < 3; i++) {
-                    gpuAtomicAdd(v_means + i, v_mean[i]);
-                }
+            for (uint32_t i = 0; i < 3; i++) {
+                gpuAtomicAdd(v_means + i, v_mean[i]);
             }
         }
         // Directly output gradients w.r.t. the quaternion and scale
-        warpSum(v_quat, warp_group_g);
-        warpSum(v_scale, warp_group_g);
-        if (warp_group_g.thread_rank() == 0) {
-            v_quats += gid * 4;
-            v_scales += gid * 3;
-            gpuAtomicAdd(v_quats, v_quat[0]);
-            gpuAtomicAdd(v_quats + 1, v_quat[1]);
-            gpuAtomicAdd(v_quats + 2, v_quat[2]);
-            gpuAtomicAdd(v_quats + 3, v_quat[3]);
-            gpuAtomicAdd(v_scales, v_scale[0]);
-            gpuAtomicAdd(v_scales + 1, v_scale[1]);
-        }
+        v_quats += gid * 4;
+        v_scales += gid * 3;
+        gpuAtomicAdd(v_quats, v_quat[0]);
+        gpuAtomicAdd(v_quats + 1, v_quat[1]);
+        gpuAtomicAdd(v_quats + 2, v_quat[2]);
+        gpuAtomicAdd(v_quats + 3, v_quat[3]);
+        gpuAtomicAdd(v_scales, v_scale[0]);
+        gpuAtomicAdd(v_scales + 1, v_scale[1]);
     }
 
     // v_viewmats is always in dense layout
     if (v_viewmats != nullptr) {
-        // Each warp group, contains threads that share the same label.
-        auto warp_group_c = cg::labeled_partition(warp, cid);
-        warpSum(v_R, warp_group_c);
-        warpSum(v_t, warp_group_c);
-        if (warp_group_c.thread_rank() == 0) {
-            v_viewmats += cid * 16;
+        v_viewmats += cid * 16;
 #pragma unroll
-            for (uint32_t i = 0; i < 3; i++) {
+        for (uint32_t i = 0; i < 3; i++) {
 #pragma unroll
-                for (uint32_t j = 0; j < 3; j++) {
-                    gpuAtomicAdd(v_viewmats + i * 4 + j, v_R[j][i]);
-                }
-                gpuAtomicAdd(v_viewmats + i * 4 + 3, v_t[i]);
+            for (uint32_t j = 0; j < 3; j++) {
+                gpuAtomicAdd(v_viewmats + i * 4 + j, v_R[j][i]);
             }
+            gpuAtomicAdd(v_viewmats + i * 4 + 3, v_t[i]);
         }
     }
 }

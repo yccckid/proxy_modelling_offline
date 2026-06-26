@@ -55,6 +55,11 @@ struct NeuralGS : torch::nn::Module {
   void freeze_structure();
   void unfreeze_structure();
 
+  int prune_by_mask(const std::shared_ptr<torch::optim::Adam> &_p_optimizer,
+                    const torch::Tensor &is_prune) {
+    return prune_gs(_p_optimizer, is_prune);
+  }
+
 private:
   void update_state(std::map<std::string, torch::Tensor> &info);
   void zero_state();
