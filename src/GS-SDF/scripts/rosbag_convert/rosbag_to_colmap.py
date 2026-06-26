@@ -5,6 +5,26 @@ ROS Bag to COLMAP Format Converter
 Converts ROS bag data (images + poses + point clouds) to COLMAP txt format
 for use with GS-SDF and other 3D reconstruction pipelines.
 
+cd ~/proxy_modelling
+python3 src/GS-SDF/scripts/rosbag_convert/rosbag_to_colmap.py \
+  --bag_path src/GS-SDF/data/my_bag/data_0621_object/my_data_0621_object.bag \
+  --image_topic /origin_img/compressed \
+  --image_pose_topic /aft_mapped_to_init_cam \
+  --point_topic /cloud_registered_body \
+  --point_pose_topic /aft_mapped_to_init_lidar \
+  --output_dir src/GS-SDF/data/my_bag/data_0621_object/ \
+  --width 1280 \
+  --height 1024 \
+  --fx 1294.2997611696601 \
+  --fy 1293.8035067346466 \
+  --cx 625.69717868846817 \
+  --cy 499.69240629695406 \
+  --k1 -0.08469119792190298 \
+  --k2 0.13301102580164631 \
+  --p1 0.00012196606307049965 \
+  --p2 0.0031281992500534028
+
+
 Usage:
     python rosbag_to_colmap.py \
         --bag_path /path/to/bag.bag \

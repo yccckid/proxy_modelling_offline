@@ -8,6 +8,10 @@ gs_iter_step: 3000
 preload: 1 # 0: disable; 1: enable # accelerate the loading process but will cost more memory
 llff: 1 # 0: disable; 1: enable; every 8 frame will be used for evaluation
 
+# rosrun neural_mapping neural_mapping_node train \
+#   src/GS-SDF/config/colmap/colmap_example.yaml \
+#   src/GS-SDF/data/my_bag/data_0621_object/
+
 
 # dataset_type
 #   Replica = 0,
@@ -35,7 +39,7 @@ bck_color: 0 # 0: black background; 1: white background; 2: discourage transpara
 frame_rate: 10
 min_range: 0.01
 max_range: 100
-ds_pt_num: 10000 # downsampled point number
+ds_pt_num: 200   # 10000 # downsampled point number
 max_pt_num: 1000000
 
 outlier_remove: 0 # unnecessary for static scenes

@@ -1,5 +1,5 @@
-input_bag: ../../GS-SDF/data/my_bag/my_data_0621.bag
-output_bag: ../../GS-SDF/data/my_bag/my_data_0621_object.bag
+input_bag: ../../GS-SDF/data/my_bag/my_data_0625.bag
+output_bag: ../../GS-SDF/data/my_bag/my_data_0625_object.bag
 
 topics:
   image: /origin_img/compressed
