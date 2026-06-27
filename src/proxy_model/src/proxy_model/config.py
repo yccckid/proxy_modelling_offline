@@ -73,10 +73,17 @@ class PointFilter:
     max_depth_m: float = 100.0
     pixel_stride: int = 2
     depth_tolerance_m: float = 0.15
+    depth_tolerance_ratio: float = 0.0
+    edge_band_px: int = 0
+    edge_depth_tolerance_m: float = 0.03
     time_tolerance_s: float = 0.02
     multiview_window: int = 2
     multiview_min_views: int = 2
     multiview_ratio: float = 0.9
+    cluster_voxel_size_m: float = 0.02
+    cluster_radius_m: float = 0.06
+    cluster_min_points: int = 20
+    keep_largest_cluster: bool = True
 
 
 @dataclass(frozen=True)
@@ -180,10 +187,21 @@ def load_config(path: str | Path) -> AppConfig:
             max_depth_m=float(point_raw.get("max_depth_m", 100.0)),
             pixel_stride=max(1, int(point_raw.get("pixel_stride", 2))),
             depth_tolerance_m=max(0.0, float(point_raw.get("depth_tolerance_m", 0.15))),
+            depth_tolerance_ratio=max(0.0, float(point_raw.get("depth_tolerance_ratio", 0.0))),
+            edge_band_px=max(0, int(point_raw.get("edge_band_px", 0))),
+            edge_depth_tolerance_m=max(
+                0.0, float(point_raw.get("edge_depth_tolerance_m", 0.03))
+            ),
             time_tolerance_s=max(0.0, float(point_raw.get("time_tolerance_s", 0.02))),
             multiview_window=max(0, int(point_raw.get("multiview_window", 2))),
             multiview_min_views=max(1, int(point_raw.get("multiview_min_views", 2))),
             multiview_ratio=min(1.0, max(0.0, float(point_raw.get("multiview_ratio", 0.9)))),
+            cluster_voxel_size_m=max(
+                1e-4, float(point_raw.get("cluster_voxel_size_m", 0.02))
+            ),
+            cluster_radius_m=max(0.0, float(point_raw.get("cluster_radius_m", 0.06))),
+            cluster_min_points=max(1, int(point_raw.get("cluster_min_points", 20))),
+            keep_largest_cluster=bool(point_raw.get("keep_largest_cluster", True)),
         ),
         output=Output(
             cache_dir=resolve(output_raw.get("cache_dir", ".proxy_model_cache")),

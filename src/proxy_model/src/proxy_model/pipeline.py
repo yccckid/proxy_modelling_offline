@@ -12,7 +12,7 @@ from PIL import Image
 from tqdm import tqdm
 
 from .config import AppConfig
-from .geometry import lidar_to_camera, points_in_mask
+from .geometry import largest_cluster_keep, lidar_to_camera, points_in_mask
 from .geometry import points_mask_consistency, pose_matrix
 from .qwen import Target, resolve_target
 from .ros_utils import (
@@ -272,6 +272,7 @@ class ObjectBagPipeline:
                             self.config.point_filter,
                         )
                         keep &= self._multiview_keep(points, index, lidar_pose.message)
+                        keep = largest_cluster_keep(points, keep, self.config.point_filter)
                     output_points += int(keep.sum())
                     destination.write(topic, filter_pointcloud(message, keep), bag_time)
                     point_count += 1

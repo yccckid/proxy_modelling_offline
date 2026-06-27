@@ -1,5 +1,5 @@
 input_bag: ../../GS-SDF/data/my_bag/data_0625_object_mask_enhanced/my_data_0625.bag
-output_bag: ../../GS-SDF/data/my_bag/data_0625_object_mask_enhanced/my_data_0625_object_mask.bag
+output_bag: ../../GS-SDF/data/my_bag/data_0625_object_mask_enhanced/my_data_0625_object_mask-v2.bag
 
 topics:
   image: /origin_img/compressed
@@ -48,12 +48,19 @@ segmentation:
 point_filter:
   min_depth_m: 0.05
   max_depth_m: 100.0
-  pixel_stride: 2
-  depth_tolerance_m: 0.15
+  pixel_stride: 1
+  depth_tolerance_m: 0.04
+  depth_tolerance_ratio: 0.01
+  edge_band_px: 4
+  edge_depth_tolerance_m: 0.02
   time_tolerance_s: 0.02
-  multiview_window: 2
-  multiview_min_views: 2
-  multiview_ratio: 0.9
+  multiview_window: 3
+  multiview_min_views: 3
+  multiview_ratio: 0.95
+  cluster_voxel_size_m: 0.02
+  cluster_radius_m: 0.06
+  cluster_min_points: 20
+  keep_largest_cluster: true
 
 output:
   cache_dir: ../../../.proxy_model_cache/my_data_0625_object_mask

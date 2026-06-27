@@ -48,7 +48,7 @@ outlier_dist: 0.05
 outlier_removal_interval: 2000
 
 # scene config
-leaf_sizes: 0.2
+leaf_sizes: 0.2 # 根据物体大小要调整，这个是marching cubes的体素大小，对于小场景，如一个小物体，就要调小一点
 bce_sigma: 0.1 # if get floaters, increase this value
 
 # visualization

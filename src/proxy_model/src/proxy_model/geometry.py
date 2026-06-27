@@ -88,6 +88,13 @@ def points_in_mask(
     if not in_mask.any():
         return keep
 
+    edge = None
+    if options.edge_band_px > 0:
+        size = 2 * options.edge_band_px + 1
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
+        core = cv2.erode(mask.astype(np.uint8), kernel).astype(bool)
+        edge = mask & ~core
+
     source_indices = source_indices[in_mask]
     u, v, depth = u[in_mask], v[in_mask], depth[in_mask]
     stride = options.pixel_stride
@@ -96,9 +103,81 @@ def points_in_mask(
     cell_id = cell_v * cells_w + cell_u
     nearest_depth = np.full(((h + stride - 1) // stride) * cells_w, np.inf)
     np.minimum.at(nearest_depth, cell_id, depth)
-    near_surface = depth <= nearest_depth[cell_id] + options.depth_tolerance_m
+    tolerance = np.maximum(
+        options.depth_tolerance_m, nearest_depth[cell_id] * options.depth_tolerance_ratio
+    )
+    if edge is not None:
+        edge_hit = edge[v, u]
+        tolerance[edge_hit] = np.minimum(tolerance[edge_hit], options.edge_depth_tolerance_m)
+    near_surface = depth <= nearest_depth[cell_id] + tolerance
     keep[source_indices[near_surface]] = True
     return keep
+
+
+def largest_cluster_keep(
+    points: np.ndarray, keep: np.ndarray, options: PointFilter
+) -> np.ndarray:
+    if not options.keep_largest_cluster or options.cluster_radius_m <= 0:
+        return keep
+
+    selected = np.flatnonzero(keep)
+    if selected.size < options.cluster_min_points:
+        return keep
+
+    pts = points[selected]
+    finite = np.isfinite(pts).all(axis=1)
+    if finite.sum() < options.cluster_min_points:
+        output = np.zeros_like(keep)
+        output[selected[finite]] = True
+        return output
+
+    selected = selected[finite]
+    pts = pts[finite]
+    voxel = max(options.cluster_voxel_size_m, options.cluster_radius_m)
+    cells = np.floor(pts / voxel).astype(np.int64)
+    buckets: dict[tuple[int, int, int], list[int]] = {}
+    for i, cell in enumerate(cells):
+        buckets.setdefault(tuple(cell), []).append(i)
+
+    parent = np.arange(len(pts), dtype=np.int32)
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = int(parent[x])
+        return x
+
+    def union(a: int, b: int) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    radius2 = options.cluster_radius_m * options.cluster_radius_m
+    offsets = [
+        (dx, dy, dz)
+        for dx in (-1, 0, 1)
+        for dy in (-1, 0, 1)
+        for dz in (-1, 0, 1)
+    ]
+    for i, cell in enumerate(cells):
+        base = tuple(cell)
+        for offset in offsets:
+            neighbor = (base[0] + offset[0], base[1] + offset[1], base[2] + offset[2])
+            for j in buckets.get(neighbor, []):
+                if j <= i:
+                    continue
+                if float(np.sum((pts[i] - pts[j]) ** 2)) <= radius2:
+                    union(i, j)
+
+    roots = np.array([find(i) for i in range(len(pts))], dtype=np.int32)
+    unique, counts = np.unique(roots, return_counts=True)
+    largest = unique[np.argmax(counts)]
+    if counts.max() < options.cluster_min_points:
+        return np.zeros_like(keep)
+
+    output = np.zeros_like(keep)
+    output[selected[roots == largest]] = True
+    return output
 
 
 def project_points(
