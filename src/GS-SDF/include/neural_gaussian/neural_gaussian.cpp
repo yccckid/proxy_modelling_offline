@@ -289,25 +289,37 @@ NeuralGS::NeuralGS(const LocalMap::Ptr &_local_map_ptr,
   auto device = _points.device();
 
   float mesh_res = 0.5f * k_leaf_size;
+  bool initialized_from_mesh = false;
   if (k_mesh_init && _sdf_enable) {
     local_map_ptr_->meshing_(mesh_res, true);
     local_map_ptr_->p_mesher_->save_mesh(k_output_path, k_vis_attribute, "gs_",
                                          true);
 
-    auto valid_vertices_idx = get<0>(torch::unique_dim(
-        local_map_ptr_->p_mesher_->faces_.to(k_device).view({-1}), 0));
+    auto &faces = local_map_ptr_->p_mesher_->faces_;
+    auto &vertices = local_map_ptr_->p_mesher_->vertices_;
+    if (faces.defined() && vertices.defined() && faces.numel() > 0 &&
+        vertices.numel() > 0) {
+      auto valid_vertices_idx =
+          get<0>(torch::unique_dim(faces.to(k_device).view({-1}), 0));
 
-    if (valid_vertices_idx.size(0) > k_vis_batch_pt_num) {
-      int sample_step = valid_vertices_idx.size(0) / k_vis_batch_pt_num;
-      sample_step = std::max(sample_step, 1);
-      valid_vertices_idx = valid_vertices_idx.slice(0, 0, -1, sample_step);
+      if (valid_vertices_idx.size(0) > k_vis_batch_pt_num) {
+        int sample_step = valid_vertices_idx.size(0) / k_vis_batch_pt_num;
+        sample_step = std::max(sample_step, 1);
+        valid_vertices_idx = valid_vertices_idx.slice(0, 0, -1, sample_step);
+      }
+      anchors_ = vertices.to(k_device).index_select(0, valid_vertices_idx);
+      scaling_ =
+          torch::full({anchors_.size(0), 3}, log(mesh_res), anchors_.options())
+              .to(device);
+      initialized_from_mesh = true;
+    } else {
+      std::cout << "\nWarning: mesh_init is enabled but meshing produced no "
+                   "valid faces; falling back to point-cloud Gaussian "
+                   "initialization.\n";
     }
-    anchors_ = local_map_ptr_->p_mesher_->vertices_.to(k_device).index_select(
-        0, valid_vertices_idx);
-    scaling_ =
-        torch::full({anchors_.size(0), 3}, log(mesh_res), anchors_.options())
-            .to(device);
-  } else {
+  }
+
+  if (!initialized_from_mesh) {
     anchors_ = _points;
     auto dist2 = torch::clamp_min(distCUDA2(_points), 1e-6f);
 

@@ -252,13 +252,13 @@ python src/GS-SDF/scripts/rosbag_convert/rosbag_to_colmap.py \
 
 ```bash
 python src/GS-SDF/scripts/rosbag_convert/rosbag_to_colmap.py \
-  --bag_path src/GS-SDF/data/my_bag/data_0621_object_mask_enhanced/my_data_0621_object_mask.bag \
+  --bag_path src/GS-SDF/data/my_bag/data_0625_object_mask_enhanced/my_data_0625_object_mask.bag \
   --image_topic /origin_img/compressed \
   --image_pose_topic /aft_mapped_to_init_cam \
   --mask_topic /proxy_model/object_mask \
   --point_topic /cloud_registered_body \
   --point_pose_topic /aft_mapped_to_init_lidar \
-  --output_dir src/GS-SDF/data/my_bag/data_0621_object_mask_enhanced \
+  --output_dir src/GS-SDF/data/my_bag/data_0625_object_mask_enhanced \
   --fx 1294.2997611696601 \
   --fy 1293.8035067346466 \
   --cx 625.69717868846817 \
@@ -270,7 +270,7 @@ python src/GS-SDF/scripts/rosbag_convert/rosbag_to_colmap.py \
   --p1 0.00012196606307049965 \
   --p2 0.0031281992500534028 \
   --k3 0.034877906107274127 \
-  --skip_point
+  --time_threshold 0.2
 ```
 
 主要区别：

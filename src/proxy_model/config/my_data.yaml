@@ -1,5 +1,5 @@
-input_bag: ../../GS-SDF/data/my_bag/my_data_0625.bag
-output_bag: ../../GS-SDF/data/my_bag/my_data_0625_object.bag
+input_bag: ../../GS-SDF/data/my_bag/data_0625_object_mask_enhanced/my_data_0625.bag
+output_bag: ../../GS-SDF/data/my_bag/data_0625_object_mask_enhanced/my_data_0625_object_mask.bag
 
 topics:
   image: /origin_img/compressed
@@ -56,7 +56,7 @@ point_filter:
   multiview_ratio: 0.9
 
 output:
-  cache_dir: ../../../.proxy_model_cache/my_data_0621
+  cache_dir: ../../../.proxy_model_cache/my_data_0625_object_mask
   jpeg_quality: 95
   save_masks: true
   save_overlays: true
