@@ -27,7 +27,7 @@ segmentation:
   sam_agent_root: /home/yc/SAM-AGENT
   checkpoint: /home/yc/SAM-AGENT/weights/sam3.pt
   device: cuda
-  confidence_threshold: 0.3
+  confidence_threshold: 0.7
   mask_dilate_px: 2
   flow_mask_dilate_px: 0
   sam_refine_margin_px: 12
@@ -54,9 +54,9 @@ point_filter:
   edge_band_px: 4
   edge_depth_tolerance_m: 0.02
   time_tolerance_s: 0.02
-  multiview_window: 3
-  multiview_min_views: 3
-  multiview_ratio: 0.95
+  multiview_window: 5
+  multiview_min_views: 5
+  multiview_ratio: 0.9
   cluster_voxel_size_m: 0.02
   cluster_radius_m: 0.06
   cluster_min_points: 20

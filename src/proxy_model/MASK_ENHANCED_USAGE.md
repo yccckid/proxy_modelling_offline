@@ -252,7 +252,7 @@ python src/GS-SDF/scripts/rosbag_convert/rosbag_to_colmap.py \
 
 ```bash
 python src/GS-SDF/scripts/rosbag_convert/rosbag_to_colmap.py \
-  --bag_path src/GS-SDF/data/my_bag/data_0625_object_mask_enhanced/my_data_0625_object_mask.bag \
+  --bag_path src/GS-SDF/data/my_bag/data_0625_object_mask_enhanced/my_data_0625_object_mask-v2.bag \
   --image_topic /origin_img/compressed \
   --image_pose_topic /aft_mapped_to_init_cam \
   --mask_topic /proxy_model/object_mask \
