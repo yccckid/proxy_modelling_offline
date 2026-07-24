@@ -28,7 +28,13 @@ from .ros_utils import (
     write_frame,
     xyz_view,
 )
-from .segmenter import SamSegmenter, mask_centroid, postprocess_mask, warp_mask
+from .segmenter import (
+    SamSegmenter,
+    flow_to_color,
+    mask_centroid,
+    postprocess_mask,
+    warp_mask,
+)
 
 
 class ObjectBagPipeline:
@@ -37,6 +43,7 @@ class ObjectBagPipeline:
         self.frames_dir = config.output.cache_dir / "frames"
         self.masks_dir = config.output.cache_dir / "masks"
         self.overlays_dir = config.output.cache_dir / "overlays"
+        self.flows_dir = config.output.cache_dir / "flows"
         self.image_stamps: list[int] = []
         self.image_paths: list[Path] = []
         self.camera_poses: list[TimedMessage] = []
@@ -77,6 +84,8 @@ class ObjectBagPipeline:
         self.masks_dir.mkdir(parents=True, exist_ok=True)
         if self.config.output.save_overlays:
             self.overlays_dir.mkdir(parents=True, exist_ok=True)
+        if self.config.output.save_flows:
+            self.flows_dir.mkdir(parents=True, exist_ok=True)
         self.config.output_bag.parent.mkdir(parents=True, exist_ok=True)
         if self.config.output_bag.exists():
             self.config.output_bag.unlink()
@@ -137,6 +146,7 @@ class ObjectBagPipeline:
         sam = SamSegmenter(self.config.segmentation)
         seed_mask = sam.predict(seed_image, self.target, self.target.center_point)
         self._save_mask(seed, seed_image, seed_mask, self.config.segmentation.mask_dilate_px)
+        self._save_flow(seed, np.zeros((*seed_image.shape[:2], 2), dtype=np.float32))
 
         self._segment_direction(sam, seed + 1, len(self.image_paths), 1, seed)
         self._segment_direction(sam, seed - 1, -1, -1, seed)
@@ -153,7 +163,17 @@ class ObjectBagPipeline:
 
         for index in tqdm(range(start, stop, step), desc=f"Segmenting {'forward' if step > 0 else 'backward'}"):
             image = self._read_frame(index)
-            propagated = warp_mask(previous_image, image, previous_mask)
+            propagated, flow = warp_mask(
+                previous_image,
+                image,
+                previous_mask,
+                self.config.segmentation.flow_smoothing_sigma_px,
+            )
+            self._save_flow(
+                index,
+                flow,
+                self.config.segmentation.flow_visual_min_magnitude_px,
+            )
             use_sam = abs(index - seed) % interval == 0
             if use_sam:
                 try:
@@ -193,6 +213,15 @@ class ObjectBagPipeline:
             raise RuntimeError(f"Failed to save mask: {path}")
         if self.config.output.save_overlays:
             write_frame(self.overlays_dir / f"{index:06d}.jpg", mask_overlay(image, mask))
+
+    def _save_flow(
+        self, index: int, flow: np.ndarray, min_magnitude_px: float = 0.0
+    ) -> None:
+        if not self.config.output.save_flows:
+            return
+        path = self.flows_dir / f"{index:06d}.png"
+        if not cv2.imwrite(str(path), flow_to_color(flow, min_magnitude_px)):
+            raise RuntimeError(f"Failed to save dense optical-flow visualization: {path}")
 
     def _read_frame(self, index: int) -> np.ndarray:
         image = cv2.imread(str(self.image_paths[index]), cv2.IMREAD_COLOR)
@@ -283,6 +312,9 @@ class ObjectBagPipeline:
         return {
             "images": image_count,
             "masks": image_count,
+            "flow_visualizations": len(self.image_paths)
+            if self.config.output.save_flows
+            else 0,
             "pointclouds": point_count,
             "input_points": input_points,
             "output_points": output_points,

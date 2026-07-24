@@ -62,6 +62,8 @@ class Segmentation:
     confidence_threshold: float = 0.3
     mask_dilate_px: int = 2
     flow_mask_dilate_px: int = 0
+    flow_smoothing_sigma_px: float = 4.0
+    flow_visual_min_magnitude_px: float = 0.5
     sam_refine_margin_px: int = 12
     min_mask_area_px: int = 100
     qwen: Qwen = field(default_factory=Qwen)
@@ -92,6 +94,7 @@ class Output:
     jpeg_quality: int = 95
     save_masks: bool = True
     save_overlays: bool = True
+    save_flows: bool = True
     overwrite: bool = False
 
 
@@ -162,6 +165,12 @@ def load_config(path: str | Path) -> AppConfig:
             confidence_threshold=float(seg_raw.get("confidence_threshold", 0.3)),
             mask_dilate_px=max(0, int(seg_raw.get("mask_dilate_px", 2))),
             flow_mask_dilate_px=max(0, int(seg_raw.get("flow_mask_dilate_px", 0))),
+            flow_smoothing_sigma_px=max(
+                0.0, float(seg_raw.get("flow_smoothing_sigma_px", 4.0))
+            ),
+            flow_visual_min_magnitude_px=max(
+                0.0, float(seg_raw.get("flow_visual_min_magnitude_px", 0.5))
+            ),
             sam_refine_margin_px=max(0, int(seg_raw.get("sam_refine_margin_px", 12))),
             min_mask_area_px=max(1, int(seg_raw.get("min_mask_area_px", 100))),
             qwen=Qwen(
@@ -208,6 +217,7 @@ def load_config(path: str | Path) -> AppConfig:
             jpeg_quality=int(output_raw.get("jpeg_quality", 95)),
             save_masks=bool(output_raw.get("save_masks", True)),
             save_overlays=bool(output_raw.get("save_overlays", True)),
+            save_flows=bool(output_raw.get("save_flows", True)),
             overwrite=bool(output_raw.get("overwrite", False)),
         ),
     )

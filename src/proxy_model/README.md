@@ -33,8 +33,11 @@ export DASHSCOPE_API_KEY="你的 key"
 - `segmentation.seed_frame`：目标清楚可见的帧号；不一定要设为 0。
 - `camera`：必须使用输入 bag 原始图像的内参和畸变参数，即此前传给 `rosbag_to_colmap.py` 的值。
 - `sam_interval`：建议先用 5；快速运动、遮挡或边界精度要求高时改为 1–3。
+- `segmentation.flow_smoothing_sigma_px`：Farneback 流向量的高斯平滑半径；增大可减少块状感，默认 `4.0`。
+- `segmentation.flow_visual_min_magnitude_px`：光流预览中保持浅色背景的最小位移，默认 `0.5` 像素。
 - `topics.mask`：输出 bag 中的 mask 话题，默认 `/proxy_model/object_mask`。
 - `point_filter.multiview_ratio`：点云多视角 mask 命中比例阈值，默认 `0.9`。
+- `output.save_flows`：是否在 `cache_dir/flows/` 输出每帧的稠密光流可视化，默认 `true`。
 - `output.overwrite`：确认允许覆盖旧输出后才设为 `true`。
 
 可先关闭 Qwen 做离线调试：
@@ -57,7 +60,10 @@ python src/proxy_model/scripts/build_object_bag.py \
   --config src/proxy_model/config/my_data_0621.yaml
 ```
 
-mask、叠加预览和统计信息保存在配置的 `cache_dir`。务必先查看 `overlays/`，确认目标实例和投影标定无误，再运行耗时较长的 GS-SDF。
+mask、叠加预览、稠密光流可视化和统计信息保存在配置的 `cache_dir`。光流图写入
+`flows/`（PNG），采用浅薰衣草色底的光流色轮：静止区域保持浅色，颜色表示方向，颜色
+饱和程度表示相对位移大小。该光流定义为当前帧到用于 mask 传播的上一帧。务必先查看
+`overlays/`，确认目标实例和投影标定无误，再运行耗时较长的 GS-SDF。
 
 ## 转 COLMAP
 

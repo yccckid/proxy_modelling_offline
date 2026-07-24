@@ -1,5 +1,5 @@
-input_bag: ../../GS-SDF/data/my_bag/data_0625_object_mask_enhanced/my_data_0625.bag
-output_bag: ../../GS-SDF/data/my_bag/data_0625_object_mask_enhanced/my_data_0625_object_mask-v2.bag
+input_bag: ../../GS-SDF/data/my_bag/data_0718_v1/my_data_v1_syn.bag
+output_bag: ../../GS-SDF/data/my_bag/data_0718_v1/my_data_v1_syn_object.bag
 
 topics:
   image: /origin_img/compressed
@@ -21,16 +21,20 @@ camera:
   distortion: [-0.08469119792190298, 0.13301102580164631, 0.00012196606307049965, 0.0031281992500534028, 0.034877906107274127]
 
 segmentation:
-  prompt: "分割出黑色行李箱"
+  prompt: "分割出混凝土预制墙"
   seed_frame: 0
   sam_interval: 3
   sam_agent_root: /home/yc/SAM-AGENT
   checkpoint: /home/yc/SAM-AGENT/weights/sam3.pt
   device: cuda
-  confidence_threshold: 0.7
-  mask_dilate_px: 2
+  confidence_threshold: 0.55
+  mask_dilate_px: 3
   flow_mask_dilate_px: 0
-  sam_refine_margin_px: 12
+  # Smooth Farneback vectors before both mask propagation and visualization.
+  flow_smoothing_sigma_px: 4.0
+  # Keep tiny frame-to-frame jitter on the light background in flow previews.
+  flow_visual_min_magnitude_px: 0.5
+  sam_refine_margin_px: 0
   min_mask_area_px: 100
   qwen:
     enabled: true
@@ -63,8 +67,9 @@ point_filter:
   keep_largest_cluster: true
 
 output:
-  cache_dir: ../../../.proxy_model_cache/my_data_0625_object_mask
+  cache_dir: ../../../.proxy_model_cache/my_data_0718_v1-2nd
   jpeg_quality: 95
   save_masks: true
   save_overlays: true
+  save_flows: true
   overwrite: true
