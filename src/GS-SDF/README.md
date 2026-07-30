@@ -237,7 +237,34 @@ Input `h` + `Enter` to see the help message.
   roslaunch neural_mapping rviz.launch
   ```
 
-## 7. Docker
+## 7. Convert `gs.ply` to an object coordinate frame
+
+After training, use the following post-processing script to make the object
+geometric centre the origin and align the three object axes with PCA principal
+axes computed from the Gaussian centres:
+
+```bash
+python3 src/GS-SDF/scripts/transform_gs_to_object_frame.py \
+  --input src/GS-SDF/output/(your_output_folder)/model/gs.ply \
+  --output src/GS-SDF/output/(your_output_folder)/model/gs_object_frame.ply
+```
+
+The script also writes `gs_object_frame.transform.json`, containing both
+`world_to_object` and `object_to_world` 4x4 matrices.  It changes `x/y/z` and
+the WXYZ quaternion fields `rot_0..rot_3`, while retaining scales, opacity and
+SH coefficients.  By default the origin is the mean of the selected Gaussian
+centres; use `--origin bbox` for bounding-box centre.  If the PLY contains
+environment Gaussians, pass `--pca-mask object_gaussian_mask.npy` (a boolean
+mask or index array) so only object Gaussians determine the PCA frame.
+
+PCA axis signs are inherently ambiguous.  The script fixes them deterministically
+and makes the frame right-handed; use the JSON transform as the authoritative
+mapping.  The SH coefficients are intentionally not rotated, so this export is
+for geometry-centric downstream use.  If it is used for view-dependent colour
+rendering, the camera poses must be transformed too and higher-order SH should
+be rotated consistently.
+
+## 8. Docker
 
 - We provide a [enroot](https://github.com/NVIDIA/enroot) docker image for testing.
   ```bash
@@ -286,7 +313,7 @@ Input `h` + `Enter` to see the help message.
   enroot export --output gs_sdf.sqsh gs_sdf
   ```
 
-## 8. Acknowledgement
+## 9. Acknowledgement
 
 Thanks for the excellent open-source projects that we rely on:
 [gsplat](https://github.com/nerfstudio-project/gsplat), [M2Mapping](https://github.com/hku-mars/M2Mapping), [nerfacc](https://github.com/nerfstudio-project/nerfacc), [tiny-cuda-nn](https://github.com/NVlabs/tiny-cuda-nn), [kaolin-wisp](https://github.com/NVIDIAGameWorks/kaolin-wisp), [CuMCubes

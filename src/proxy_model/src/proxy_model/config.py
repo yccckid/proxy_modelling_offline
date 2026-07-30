@@ -62,6 +62,9 @@ class Segmentation:
     confidence_threshold: float = 0.3
     mask_dilate_px: int = 2
     flow_mask_dilate_px: int = 0
+    geometry_flow_enabled: bool = True
+    geometry_flow_voxel_size_m: float = 0.03
+    geometry_flow_min_seed_points: int = 20
     flow_smoothing_sigma_px: float = 4.0
     flow_visual_min_magnitude_px: float = 0.5
     sam_refine_margin_px: int = 12
@@ -95,6 +98,8 @@ class Output:
     save_masks: bool = True
     save_overlays: bool = True
     save_flows: bool = True
+    save_labeled_pcd: bool = True
+    save_point_images: bool = True
     overwrite: bool = False
 
 
@@ -165,6 +170,13 @@ def load_config(path: str | Path) -> AppConfig:
             confidence_threshold=float(seg_raw.get("confidence_threshold", 0.3)),
             mask_dilate_px=max(0, int(seg_raw.get("mask_dilate_px", 2))),
             flow_mask_dilate_px=max(0, int(seg_raw.get("flow_mask_dilate_px", 0))),
+            geometry_flow_enabled=bool(seg_raw.get("geometry_flow_enabled", True)),
+            geometry_flow_voxel_size_m=max(
+                1e-3, float(seg_raw.get("geometry_flow_voxel_size_m", 0.03))
+            ),
+            geometry_flow_min_seed_points=max(
+                1, int(seg_raw.get("geometry_flow_min_seed_points", 20))
+            ),
             flow_smoothing_sigma_px=max(
                 0.0, float(seg_raw.get("flow_smoothing_sigma_px", 4.0))
             ),
@@ -218,6 +230,8 @@ def load_config(path: str | Path) -> AppConfig:
             save_masks=bool(output_raw.get("save_masks", True)),
             save_overlays=bool(output_raw.get("save_overlays", True)),
             save_flows=bool(output_raw.get("save_flows", True)),
+            save_labeled_pcd=bool(output_raw.get("save_labeled_pcd", True)),
+            save_point_images=bool(output_raw.get("save_point_images", True)),
             overwrite=bool(output_raw.get("overwrite", False)),
         ),
     )

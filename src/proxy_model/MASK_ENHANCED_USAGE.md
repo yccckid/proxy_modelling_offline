@@ -50,6 +50,8 @@
    ├── masks/       # 每帧二值 mask，000000.png ...
    ├── overlays/    # 可视化叠加图，便于检查 mask 质量
    ├── flows/       # 平滑的稠密光流可视化，浅色底；颜色为方向、饱和程度为相对位移大小
+   ├── labeled_pcd/ # 世界坐标完整点云；label=1 object，label=0 non-object
+   ├── point_image/ # overlay 上叠加 mask 内投影点
    └── summary.json # 统计信息
    ```
 
@@ -66,6 +68,10 @@
    `sam_interval: 3` 表示每 3 帧调用一次 SAM；`sam_interval: 1` 表示每帧都调用 SAM。
 
 3. 非关键帧使用光流传播 mask。
+
+   若输入 bag 同时提供点云和相机/雷达位姿，流程会优先把 mask 内的静态 3D 点投影到
+   下一帧，并在该 mask 连通区域内快速补全稠密几何光流。该方法不假设目标是平面，对
+   无纹理的任意形状装配式构件也适用；点云覆盖不足时才使用 Farneback 回退。
 
    使用 OpenCV Farneback 光流把上一帧 mask warp 到当前帧，降低 SAM 调用频率。
 
@@ -253,13 +259,13 @@ python src/GS-SDF/scripts/rosbag_convert/rosbag_to_colmap.py \
 
 ```bash
 python src/GS-SDF/scripts/rosbag_convert/rosbag_to_colmap.py \
-  --bag_path src/GS-SDF/data/my_bag/data_0625_object_mask_enhanced/my_data_0625_object_mask-v2.bag \
+  --bag_path src/GS-SDF/data/my_bag/data_0718_v1/my_data_v1_syn_object.bag \
   --image_topic /origin_img/compressed \
   --image_pose_topic /aft_mapped_to_init_cam \
   --mask_topic /proxy_model/object_mask \
   --point_topic /cloud_registered_body \
   --point_pose_topic /aft_mapped_to_init_lidar \
-  --output_dir src/GS-SDF/data/my_bag/data_0625_object_mask_enhanced \
+  --output_dir src/GS-SDF/data/my_bag/data_0718_v1 \
   --fx 1294.2997611696601 \
   --fy 1293.8035067346466 \
   --cx 625.69717868846817 \

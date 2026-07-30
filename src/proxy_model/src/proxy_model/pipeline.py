@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import time
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import cv2
@@ -12,8 +12,18 @@ from PIL import Image
 from tqdm import tqdm
 
 from .config import AppConfig
-from .geometry import largest_cluster_keep, lidar_to_camera, points_in_mask
-from .geometry import points_mask_consistency, pose_matrix
+from .geometry import (
+    forward_warp_mask_with_flow,
+    geometric_forward_flow,
+    largest_cluster_keep,
+    lidar_to_camera,
+    points_in_mask,
+    points_mask_consistency,
+    points_projected_in_mask,
+    pose_matrix,
+    transform_points,
+    voxel_downsample,
+)
 from .qwen import Target, resolve_target
 from .ros_utils import (
     TimedMessage,
@@ -25,16 +35,25 @@ from .ros_utils import (
     mask_overlay,
     message_stamp_ns,
     nearest,
+    pointcloud_mask_overlay,
     write_frame,
+    write_labeled_pcd,
     xyz_view,
 )
 from .segmenter import (
     SamSegmenter,
+    dense_optical_flow,
     flow_to_color,
     mask_centroid,
     postprocess_mask,
     warp_mask,
 )
+
+
+@dataclass(frozen=True)
+class TimedPoints:
+    stamp_ns: int
+    points: np.ndarray
 
 
 class ObjectBagPipeline:
@@ -44,11 +63,16 @@ class ObjectBagPipeline:
         self.masks_dir = config.output.cache_dir / "masks"
         self.overlays_dir = config.output.cache_dir / "overlays"
         self.flows_dir = config.output.cache_dir / "flows"
+        self.labeled_pcd_dir = config.output.cache_dir / "labeled_pcd"
+        self.point_images_dir = config.output.cache_dir / "point_image"
         self.image_stamps: list[int] = []
         self.image_paths: list[Path] = []
         self.camera_poses: list[TimedMessage] = []
         self.lidar_poses: list[TimedMessage] = []
+        self.pointclouds: list[TimedPoints] = []
         self.target: Target | None = None
+        self.geometry_flow_frames = 0
+        self.farneback_flow_frames = 0
 
     def run(self) -> None:
         self._validate()
@@ -57,6 +81,8 @@ class ObjectBagPipeline:
         self._extract_frames_and_poses()
         self._segment_frames()
         stats = self._rewrite_bag()
+        stats["geometric_flow_frames"] = self.geometry_flow_frames
+        stats["farneback_flow_fallback_frames"] = self.farneback_flow_frames
         stats["elapsed_s"] = round(time.perf_counter() - started, 3)
         stats["target"] = asdict(self.target) if self.target else None
         stats["input_bag"] = str(self.config.input_bag)
@@ -86,6 +112,10 @@ class ObjectBagPipeline:
             self.overlays_dir.mkdir(parents=True, exist_ok=True)
         if self.config.output.save_flows:
             self.flows_dir.mkdir(parents=True, exist_ok=True)
+        if self.config.output.save_labeled_pcd:
+            self.labeled_pcd_dir.mkdir(parents=True, exist_ok=True)
+        if self.config.output.save_point_images:
+            self.point_images_dir.mkdir(parents=True, exist_ok=True)
         self.config.output_bag.parent.mkdir(parents=True, exist_ok=True)
         if self.config.output_bag.exists():
             self.config.output_bag.unlink()
@@ -94,7 +124,12 @@ class ObjectBagPipeline:
         import rosbag
 
         topics = self.config.topics
-        interested = [topics.image, topics.image_pose, topics.pointcloud_pose]
+        interested = [
+            topics.image,
+            topics.image_pose,
+            topics.pointcloud,
+            topics.pointcloud_pose,
+        ]
         with rosbag.Bag(str(self.config.input_bag), "r") as bag:
             count = 0
             for topic, message, bag_time in tqdm(
@@ -123,12 +158,21 @@ class ObjectBagPipeline:
                     self.camera_poses.append(timed)
                 if topic == topics.pointcloud_pose:
                     self.lidar_poses.append(timed)
+                if topic == topics.pointcloud:
+                    points = voxel_downsample(
+                        xyz_view(message),
+                        self.config.segmentation.geometry_flow_voxel_size_m,
+                    )
+                    self.pointclouds.append(TimedPoints(stamp_ns, points))
         self.camera_poses.sort(key=lambda item: item.stamp_ns)
         self.lidar_poses.sort(key=lambda item: item.stamp_ns)
+        self.pointclouds.sort(key=lambda item: item.stamp_ns)
         if not self.image_paths:
             raise RuntimeError(f"No images found on topic {topics.image}")
         if not self.camera_poses or not self.lidar_poses:
             raise RuntimeError("Camera or lidar odometry topic is empty")
+        if self.config.segmentation.geometry_flow_enabled and not self.pointclouds:
+            print("Warning: pointcloud topic is empty; geometry flow will fall back to Farneback")
 
     def _segment_frames(self) -> None:
         seed = self.config.segmentation.seed_frame
@@ -156,24 +200,45 @@ class ObjectBagPipeline:
     ) -> None:
         if start == stop:
             return
-        previous_image = self._read_frame(seed)
+        previous_index = seed
+        previous_image = self._read_frame(previous_index)
         previous_mask = self._load_mask(seed)
         point = mask_centroid(previous_mask)
         interval = self.config.segmentation.sam_interval
 
         for index in tqdm(range(start, stop, step), desc=f"Segmenting {'forward' if step > 0 else 'backward'}"):
             image = self._read_frame(index)
-            propagated, flow = warp_mask(
-                previous_image,
-                image,
-                previous_mask,
-                self.config.segmentation.flow_smoothing_sigma_px,
+            geometric_result = self._geometric_warp_mask(
+                previous_index, index, previous_mask
             )
-            self._save_flow(
-                index,
-                flow,
-                self.config.segmentation.flow_visual_min_magnitude_px,
-            )
+            if geometric_result is None:
+                propagated, flow = warp_mask(
+                    previous_image,
+                    image,
+                    previous_mask,
+                    self.config.segmentation.flow_smoothing_sigma_px,
+                )
+                self.farneback_flow_frames += 1
+                self._save_flow(
+                    index,
+                    flow,
+                    self.config.segmentation.flow_visual_min_magnitude_px,
+                )
+            else:
+                propagated, geometric_flow = geometric_result
+                self.geometry_flow_frames += 1
+                background_flow = dense_optical_flow(
+                    previous_image,
+                    image,
+                    self.config.segmentation.flow_smoothing_sigma_px,
+                )
+                self._save_flow(
+                    index,
+                    background_flow,
+                    self.config.segmentation.flow_visual_min_magnitude_px,
+                    target_mask=propagated,
+                    target_flow=geometric_flow,
+                )
             use_sam = abs(index - seed) % interval == 0
             if use_sam:
                 try:
@@ -191,8 +256,44 @@ class ObjectBagPipeline:
                 else self.config.segmentation.flow_mask_dilate_px
             )
             self._save_mask(index, image, mask, dilate_px)
-            previous_image, previous_mask = image, self._load_mask(index)
+            previous_index, previous_image, previous_mask = (
+                index,
+                image,
+                self._load_mask(index),
+            )
             point = mask_centroid(previous_mask) or point
+
+    def _geometric_warp_mask(
+        self, previous_index: int, current_index: int, previous_mask: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray] | None:
+        """Propagate a target mask from static 3-D points when they are available."""
+        options = self.config.segmentation
+        if not options.geometry_flow_enabled:
+            return None
+        tolerance_s = self.config.point_filter.time_tolerance_s
+        previous_stamp = self.image_stamps[previous_index]
+        current_stamp = self.image_stamps[current_index]
+        pointcloud = nearest(self.pointclouds, previous_stamp, tolerance_s)
+        previous_camera = nearest(self.camera_poses, previous_stamp, tolerance_s)
+        current_camera = nearest(self.camera_poses, current_stamp, tolerance_s)
+        if pointcloud is None or previous_camera is None or current_camera is None:
+            return None
+        lidar_pose = nearest(self.lidar_poses, pointcloud.stamp_ns, tolerance_s)
+        if lidar_pose is None:
+            return None
+        forward_flow = geometric_forward_flow(
+            pointcloud.points,
+            lidar_to_camera(previous_camera.message, lidar_pose.message),
+            lidar_to_camera(current_camera.message, lidar_pose.message),
+            previous_mask,
+            self.config.camera,
+            self.config.point_filter.min_depth_m,
+            self.config.point_filter.max_depth_m,
+            options.geometry_flow_min_seed_points,
+        )
+        if forward_flow is None:
+            return None
+        return forward_warp_mask_with_flow(previous_mask, forward_flow)
 
     def _constrain_sam_mask(self, sam_mask: np.ndarray, flow_prior: np.ndarray) -> np.ndarray:
         margin = self.config.segmentation.sam_refine_margin_px
@@ -215,12 +316,23 @@ class ObjectBagPipeline:
             write_frame(self.overlays_dir / f"{index:06d}.jpg", mask_overlay(image, mask))
 
     def _save_flow(
-        self, index: int, flow: np.ndarray, min_magnitude_px: float = 0.0
+        self,
+        index: int,
+        flow: np.ndarray,
+        min_magnitude_px: float = 0.0,
+        target_mask: np.ndarray | None = None,
+        target_flow: np.ndarray | None = None,
     ) -> None:
         if not self.config.output.save_flows:
             return
         path = self.flows_dir / f"{index:06d}.png"
-        if not cv2.imwrite(str(path), flow_to_color(flow, min_magnitude_px)):
+        visualization = flow_to_color(flow, min_magnitude_px)
+        if target_mask is not None and target_flow is not None:
+            # Keep sub-pixel geometry flow visible on the target while the rest
+            # of the image uses thresholded Farneback flow to suppress noise.
+            target_visualization = flow_to_color(target_flow, 0.0)
+            visualization[target_mask] = target_visualization[target_mask]
+        if not cv2.imwrite(str(path), visualization):
             raise RuntimeError(f"Failed to save dense optical-flow visualization: {path}")
 
     def _read_frame(self, index: int) -> np.ndarray:
@@ -251,6 +363,8 @@ class ObjectBagPipeline:
 
         topics = self.config.topics
         image_count = point_count = input_points = output_points = unmatched_points = 0
+        labeled_pcd_count = point_image_count = object_labeled_points = 0
+        label_export_unmatched = 0
         with rosbag.Bag(str(self.config.input_bag), "r") as source, rosbag.Bag(
             str(self.config.output_bag), "w"
         ) as destination:
@@ -292,11 +406,56 @@ class ObjectBagPipeline:
                     if index is None or camera_pose is None or lidar_pose is None:
                         keep = np.zeros(len(points), dtype=bool)
                         unmatched_points += len(points)
+                        label_export_unmatched += 1
                     else:
+                        mask = self._load_mask(index)
+                        transform_camera_lidar = lidar_to_camera(
+                            camera_pose.message, lidar_pose.message
+                        )
+                        image_camera_pose = nearest(
+                            self.camera_poses,
+                            self.image_stamps[index],
+                            self.config.point_filter.time_tolerance_s,
+                        )
+                        projection_camera_pose = image_camera_pose or camera_pose
+                        transform_image_camera_lidar = lidar_to_camera(
+                            projection_camera_pose.message, lidar_pose.message
+                        )
+                        object_labels, projected_uv = points_projected_in_mask(
+                            points,
+                            transform_image_camera_lidar,
+                            mask,
+                            self.config.camera,
+                            self.config.point_filter.min_depth_m,
+                            self.config.point_filter.max_depth_m,
+                        )
+                        object_labeled_points += int(object_labels.sum())
+                        export_name = f"{point_count:06d}"
+                        if self.config.output.save_labeled_pcd:
+                            transform_world_lidar = pose_matrix(lidar_pose.message)
+                            points_world = transform_points(points, transform_world_lidar)
+                            write_labeled_pcd(
+                                self.labeled_pcd_dir / f"{export_name}.pcd",
+                                points_world,
+                                object_labels,
+                            )
+                            labeled_pcd_count += 1
+                        if self.config.output.save_point_images:
+                            overlay_path = self.overlays_dir / f"{index:06d}.jpg"
+                            overlay = cv2.imread(str(overlay_path), cv2.IMREAD_COLOR)
+                            if overlay is None:
+                                overlay = mask_overlay(self._read_frame(index), mask)
+                            write_frame(
+                                self.point_images_dir / f"{export_name}.jpg",
+                                pointcloud_mask_overlay(
+                                    overlay, projected_uv, object_labels
+                                ),
+                            )
+                            point_image_count += 1
                         keep = points_in_mask(
                             points,
-                            lidar_to_camera(camera_pose.message, lidar_pose.message),
-                            self._load_mask(index),
+                            transform_camera_lidar,
+                            mask,
                             self.config.camera,
                             self.config.point_filter,
                         )
@@ -319,6 +478,10 @@ class ObjectBagPipeline:
             "input_points": input_points,
             "output_points": output_points,
             "unmatched_points_removed": unmatched_points,
+            "labeled_pcds": labeled_pcd_count,
+            "point_images": point_image_count,
+            "object_labeled_points": object_labeled_points,
+            "label_export_unmatched_frames": label_export_unmatched,
         }
 
     def _multiview_keep(self, points: np.ndarray, image_index: int, lidar_pose: object) -> np.ndarray:

@@ -124,6 +124,91 @@ def write_frame(path: Path, image: np.ndarray) -> None:
         raise RuntimeError(f"Failed to write image: {path}")
 
 
+def write_labeled_pcd(
+    path: Path, points_world: np.ndarray, object_labels: np.ndarray
+) -> None:
+    """Write world-frame XYZ and uint32 semantic labels as binary PCD 0.7."""
+    points_world = np.asarray(points_world, dtype=np.float64)
+    object_labels = np.asarray(object_labels, dtype=bool).reshape(-1)
+    if points_world.shape != (len(object_labels), 3):
+        raise ValueError(
+            f"Point/label shape mismatch: {points_world.shape} vs {object_labels.shape}"
+        )
+    finite = np.isfinite(points_world).all(axis=1)
+    points_world = points_world[finite]
+    object_labels = object_labels[finite]
+    records = np.empty(
+        len(points_world),
+        dtype=np.dtype(
+            [
+                ("x", "<f4"),
+                ("y", "<f4"),
+                ("z", "<f4"),
+                ("label", "<u4"),
+            ]
+        ),
+    )
+    records["x"] = points_world[:, 0]
+    records["y"] = points_world[:, 1]
+    records["z"] = points_world[:, 2]
+    records["label"] = object_labels.astype(np.uint32)
+    header = (
+        "# .PCD v0.7 - Point Cloud Data file format\n"
+        "VERSION 0.7\n"
+        "FIELDS x y z label\n"
+        "SIZE 4 4 4 4\n"
+        "TYPE F F F U\n"
+        "COUNT 1 1 1 1\n"
+        f"WIDTH {len(records)}\n"
+        "HEIGHT 1\n"
+        "VIEWPOINT 0 0 0 1 0 0 0\n"
+        f"POINTS {len(records)}\n"
+        "DATA binary\n"
+    ).encode("ascii")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as output:
+        output.write(header)
+        output.write(records.tobytes())
+
+
+def pointcloud_mask_overlay(
+    image: np.ndarray,
+    projected_uv: np.ndarray,
+    object_labels: np.ndarray,
+) -> np.ndarray:
+    """Overlay mask-labeled projected points in magenta on an image."""
+    output = image.copy()
+    object_labels = np.asarray(object_labels, dtype=bool).reshape(-1)
+    selected_uv = np.asarray(projected_uv, dtype=np.float64)[object_labels]
+    finite = np.isfinite(selected_uv).all(axis=1)
+    selected_uv = selected_uv[finite]
+    if len(selected_uv) == 0:
+        return output
+    pixels = np.rint(selected_uv).astype(np.int32)
+    h, w = output.shape[:2]
+    inside = (
+        (pixels[:, 0] >= 0)
+        & (pixels[:, 0] < w)
+        & (pixels[:, 1] >= 0)
+        & (pixels[:, 1] < h)
+    )
+    pixels = pixels[inside]
+    if len(pixels) == 0:
+        return output
+    point_map = np.zeros((h, w), dtype=np.uint8)
+    point_map[pixels[:, 1], pixels[:, 0]] = 255
+    point_map = cv2.dilate(
+        point_map,
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)),
+    )
+    hit = point_map > 0
+    color = np.zeros_like(output)
+    color[..., 0] = 255
+    color[..., 2] = 255
+    output[hit] = cv2.addWeighted(output[hit], 0.2, color[hit], 0.8, 0)
+    return output
+
+
 def apply_mask(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
     output = np.zeros_like(image)
     output[mask] = image[mask]

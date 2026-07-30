@@ -33,11 +33,17 @@ export DASHSCOPE_API_KEY="你的 key"
 - `segmentation.seed_frame`：目标清楚可见的帧号；不一定要设为 0。
 - `camera`：必须使用输入 bag 原始图像的内参和畸变参数，即此前传给 `rosbag_to_colmap.py` 的值。
 - `sam_interval`：建议先用 5；快速运动、遮挡或边界精度要求高时改为 1–3。
+- `segmentation.geometry_flow_enabled`：优先使用点云和相机位姿生成对象级几何光流；对无纹理构件内部有效，默认 `true`。
+- `segmentation.geometry_flow_voxel_size_m`：几何光流点云的体素下采样尺寸；增大可降低内存与计算量，默认 `0.03` 米。
+- `segmentation.geometry_flow_min_seed_points`：mask 内至少需要的有效 3D 投影点数；不足时回退 Farneback，默认 `20`。
 - `segmentation.flow_smoothing_sigma_px`：Farneback 流向量的高斯平滑半径；增大可减少块状感，默认 `4.0`。
 - `segmentation.flow_visual_min_magnitude_px`：光流预览中保持浅色背景的最小位移，默认 `0.5` 像素。
 - `topics.mask`：输出 bag 中的 mask 话题，默认 `/proxy_model/object_mask`。
 - `point_filter.multiview_ratio`：点云多视角 mask 命中比例阈值，默认 `0.9`。
 - `output.save_flows`：是否在 `cache_dir/flows/` 输出每帧的稠密光流可视化，默认 `true`。
+- `output.save_labeled_pcd`：是否输出世界坐标系下的完整标签点云；PCD 的 `label=1`
+  表示投影落在 mask 内，`label=0` 表示 non-object，默认 `true`。
+- `output.save_point_images`：是否把 mask 内点云投影以紫红色叠加到 overlay，默认 `true`。
 - `output.overwrite`：确认允许覆盖旧输出后才设为 `true`。
 
 可先关闭 Qwen 做离线调试：
@@ -62,8 +68,20 @@ python src/proxy_model/scripts/build_object_bag.py \
 
 mask、叠加预览、稠密光流可视化和统计信息保存在配置的 `cache_dir`。光流图写入
 `flows/`（PNG），采用浅薰衣草色底的光流色轮：静止区域保持浅色，颜色表示方向，颜色
-饱和程度表示相对位移大小。该光流定义为当前帧到用于 mask 传播的上一帧。务必先查看
+饱和程度表示相对位移大小。整图保留 Farneback 环境光流；目标 mask 内有可靠点云时以
+几何光流覆盖。该光流定义为当前帧到用于 mask 传播的上一帧。务必先查看
 `overlays/`，确认目标实例和投影标定无误，再运行耗时较长的 GS-SDF。
+
+此外，每个匹配点云帧会新增：
+
+```text
+cache_dir/
+├── labeled_pcd/  # 世界坐标完整点云，字段 x y z label；CloudCompare 可直接打开
+└── point_image/  # mask overlay + mask 内投影点（紫红色）
+```
+
+两个目录使用同一个六位点云帧编号。标签仅由当前点投影是否落入对应图像 mask 决定，
+不会被后续多视角一致性、最大聚类或输出 bag 点云过滤改变。
 
 ## 转 COLMAP
 

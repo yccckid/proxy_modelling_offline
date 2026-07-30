@@ -30,6 +30,11 @@ segmentation:
   confidence_threshold: 0.55
   mask_dilate_px: 3
   flow_mask_dilate_px: 0
+  # Use lidar points and the two camera poses to propagate the target mask.
+  # This is shape-independent and supplies flow inside textureless components.
+  geometry_flow_enabled: true
+  geometry_flow_voxel_size_m: 0.03
+  geometry_flow_min_seed_points: 20
   # Smooth Farneback vectors before both mask propagation and visualization.
   flow_smoothing_sigma_px: 4.0
   # Keep tiny frame-to-frame jitter on the light background in flow previews.
@@ -72,4 +77,6 @@ output:
   save_masks: true
   save_overlays: true
   save_flows: true
+  save_labeled_pcd: true
+  save_point_images: true
   overwrite: true
