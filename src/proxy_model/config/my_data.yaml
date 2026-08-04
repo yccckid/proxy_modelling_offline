@@ -1,5 +1,5 @@
-input_bag: ../../GS-SDF/data/my_bag/data_0718_v1/my_data_v1_syn.bag
-output_bag: ../../GS-SDF/data/my_bag/data_0718_v1/my_data_v1_syn_object.bag
+input_bag: ../../GS-SDF/data/my_bag/data_0729_fengxian/my_data_v2_syn.bag
+output_bag: ../../GS-SDF/data/my_bag/data_0729_fengxian/my_data_v4_syn_object.bag
 
 topics:
   image: /origin_img/compressed
@@ -21,26 +21,31 @@ camera:
   distortion: [-0.08469119792190298, 0.13301102580164631, 0.00012196606307049965, 0.0031281992500534028, 0.034877906107274127]
 
 segmentation:
-  prompt: "分割出混凝土预制墙"
+  prompt: "分割出混凝土预制楼梯"
   seed_frame: 0
-  sam_interval: 3
   sam_agent_root: /home/yc/SAM-AGENT
   checkpoint: /home/yc/SAM-AGENT/weights/sam3.pt
   device: cuda
   confidence_threshold: 0.55
-  mask_dilate_px: 3
-  flow_mask_dilate_px: 0
-  # Use lidar points and the two camera poses to propagate the target mask.
-  # This is shape-independent and supplies flow inside textureless components.
-  geometry_flow_enabled: true
-  geometry_flow_voxel_size_m: 0.03
-  geometry_flow_min_seed_points: 20
-  # Smooth Farneback vectors before both mask propagation and visualization.
-  flow_smoothing_sigma_px: 4.0
-  # Keep tiny frame-to-frame jitter on the light background in flow previews.
-  flow_visual_min_magnitude_px: 0.5
-  sam_refine_margin_px: 0
   min_mask_area_px: 100
+  # Native SAM3 video-memory backend.  Use sam3.1 only with a matching 3.1 checkpoint.
+  video_model_version: sam3
+  video_checkpoint: /home/yc/SAM-AGENT/weights/sam3.pt
+  video_compile: false
+  mask_threshold: 0.5
+  fb_iou_threshold: 0.65
+  quality_threshold: 0.60
+  view_novelty_threshold: 0.32
+  min_anchor_time_gap_s: 2.0
+  max_anchor_memory: 8
+  # The supplied SAM3 video checkpoint has seven native memory slots; this may
+  # be reduced, but cannot safely be increased without rebuilding the model.
+  max_working_memory: 7
+  max_recovery_frames: 80
+  recovery_prompt_min_confidence: 0.45
+  min_component_area_px: 100
+  max_hole_area_px: 400
+  allow_hole_filling: true
   qwen:
     enabled: true
     model: qwen3-vl-plus
@@ -72,11 +77,12 @@ point_filter:
   keep_largest_cluster: true
 
 output:
-  cache_dir: ../../../.proxy_model_cache/my_data_0718_v1-2nd
+  cache_dir: ../../../.proxy_model_cache/my_data_0729_v3
   jpeg_quality: 95
   save_masks: true
   save_overlays: true
-  save_flows: true
+  save_probabilities: true
+  save_disagreements: true
   save_labeled_pcd: true
   save_point_images: true
   overwrite: true

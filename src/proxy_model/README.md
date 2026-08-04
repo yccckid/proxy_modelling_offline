@@ -6,7 +6,7 @@
 
 1. 从 bag 顺序提取图像和 camera/lidar 位姿。
 2. Qwen-VL 在种子帧上仅调用一次，把中文目标描述解析为 SAM 可用的英文类别和实例中心。
-3. SAM 3 在种子帧和周期关键帧上分割；关键帧之间使用稠密光流传播 mask。`sam_interval: 1` 表示每帧都用 SAM，精度最高。
+3. SAM 3 在种子帧建立初始锚点；SAM3 原生视频记忆模型在全部帧上进行对象级传播。系统自动选择经 SAM3 验证的新视角锚点，并在前后向预测不一致、质量低或面积突变时才调用 SAM3 恢复，不使用固定间隔重分割。
 4. 图像 mask 外像素置黑。
 5. 使用逐帧 `inv(T_world_camera) @ T_world_lidar` 把点云投影到图像；仅保留 mask 内且接近该像素栅格最近深度的点。
 6. 对点云做轻量多视角一致性检查：同一个点在邻近多个视角中投影到前景 mask 的比例超过阈值才保留。
@@ -32,15 +32,15 @@ export DASHSCOPE_API_KEY="你的 key"
 - `segmentation.prompt`：明确描述场景中的那一个物体。
 - `segmentation.seed_frame`：目标清楚可见的帧号；不一定要设为 0。
 - `camera`：必须使用输入 bag 原始图像的内参和畸变参数，即此前传给 `rosbag_to_colmap.py` 的值。
-- `sam_interval`：建议先用 5；快速运动、遮挡或边界精度要求高时改为 1–3。
-- `segmentation.geometry_flow_enabled`：优先使用点云和相机位姿生成对象级几何光流；对无纹理构件内部有效，默认 `true`。
-- `segmentation.geometry_flow_voxel_size_m`：几何光流点云的体素下采样尺寸；增大可降低内存与计算量，默认 `0.03` 米。
-- `segmentation.geometry_flow_min_seed_points`：mask 内至少需要的有效 3D 投影点数；不足时回退 Farneback，默认 `20`。
-- `segmentation.flow_smoothing_sigma_px`：Farneback 流向量的高斯平滑半径；增大可减少块状感，默认 `4.0`。
-- `segmentation.flow_visual_min_magnitude_px`：光流预览中保持浅色背景的最小位移，默认 `0.5` 像素。
+- `segmentation.video_model_version`：SAM3 视频后端版本；当前本地 `sam3.pt` 配合 `sam3`。只有安装匹配权重时才改为 `sam3.1`。
+- `segmentation.mask_threshold`、`fb_iou_threshold`、`quality_threshold`：二值化、双向一致性和自动恢复阈值。
+- `segmentation.max_anchor_memory`、`max_working_memory`：永久锚点与 SAM3 原生近期记忆的容量上限。
+- `segmentation.view_novelty_threshold`、`min_anchor_time_gap_s`：自动新视角锚点的外观/形状新颖性和时间 NMS 条件。
+- `segmentation.max_recovery_frames`：单个 bag 最多允许的 SAM3 自动恢复次数，避免低质量序列退化成逐帧 SAM3。
 - `topics.mask`：输出 bag 中的 mask 话题，默认 `/proxy_model/object_mask`。
 - `point_filter.multiview_ratio`：点云多视角 mask 命中比例阈值，默认 `0.9`。
-- `output.save_flows`：是否在 `cache_dir/flows/` 输出每帧的稠密光流可视化，默认 `true`。
+- `output.save_probabilities`：是否在 `cache_dir/probabilities/` 保存视频模型的前景置信度图，默认 `true`。
+- `output.save_disagreements`：是否保存 `cache_dir/disagreements/` 中的前后向概率差异图，默认 `true`。
 - `output.save_labeled_pcd`：是否输出世界坐标系下的完整标签点云；PCD 的 `label=1`
   表示投影落在 mask 内，`label=0` 表示 non-object，默认 `true`。
 - `output.save_point_images`：是否把 mask 内点云投影以紫红色叠加到 overlay，默认 `true`。
@@ -66,11 +66,11 @@ python src/proxy_model/scripts/build_object_bag.py \
   --config src/proxy_model/config/my_data_0621.yaml
 ```
 
-mask、叠加预览、稠密光流可视化和统计信息保存在配置的 `cache_dir`。光流图写入
-`flows/`（PNG），采用浅薰衣草色底的光流色轮：静止区域保持浅色，颜色表示方向，颜色
-饱和程度表示相对位移大小。整图保留 Farneback 环境光流；目标 mask 内有可靠点云时以
-几何光流覆盖。该光流定义为当前帧到用于 mask 传播的上一帧。务必先查看
-`overlays/`，确认目标实例和投影标定无误，再运行耗时较长的 GS-SDF。
+mask、叠加预览、前景置信度图和统计信息保存在配置的 `cache_dir`。不再生成或使用
+`flows/`。同级的 `segmentation_metrics.csv` 保存每帧质量项、前后向 IoU、来源、锚点、
+恢复标记和 VOS 时间；每行也含该 bag 的 SAM3 调用数、峰值显存/内存、记忆容量和处理
+效率汇总。务必先查看 `overlays/` 和 CSV 中的 `failure_flags`，确认目标实例无误，再运行
+耗时较长的 GS-SDF。
 
 此外，每个匹配点云帧会新增：
 

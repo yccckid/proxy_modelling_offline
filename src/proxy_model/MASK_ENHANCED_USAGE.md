@@ -49,41 +49,29 @@
    ├── frames/      # 原始抽帧
    ├── masks/       # 每帧二值 mask，000000.png ...
    ├── overlays/    # 可视化叠加图，便于检查 mask 质量
-   ├── flows/       # 平滑的稠密光流可视化，浅色底；颜色为方向、饱和程度为相对位移大小
-   ├── labeled_pcd/ # 世界坐标完整点云；label=1 object，label=0 non-object
-   ├── point_image/ # overlay 上叠加 mask 内投影点
-   └── summary.json # 统计信息
+├── probabilities/ # SAM3 视频记忆模型的前景置信度图
+├── disagreements/ # 前向/后向概率差异图；单向区域为空
+├── labeled_pcd/ # 世界坐标完整点云；label=1 object，label=0 non-object
+├── point_image/ # overlay 上叠加 mask 内投影点
+├── segmentation_metrics.csv # 每帧质量、锚点、前后向一致性与效率指标
+└── summary.json # 统计信息
    ```
 
 ### 分割策略
 
-分割不是每帧都调用大模型。当前设计是：
+分割不是每帧都调用图像 SAM3，也不使用光流。当前设计是：
 
 1. Qwen-VL 只在种子帧调用一次。
 
    它把中文目标描述解析成 SAM 可用的目标文本、实例模式和可选中心点。
 
-2. SAM 在种子帧和周期关键帧调用。
+2. 图像 SAM3 在种子帧生成并验证永久锚点；随后以该锚点的文本和目标框初始化 SAM3 原生视频记忆模型。
 
-   `sam_interval: 3` 表示每 3 帧调用一次 SAM；`sam_interval: 1` 表示每帧都调用 SAM。
+3. 系统先完成一次记忆式初步传播，对高质量且视角新颖的帧重新调用图像 SAM3；通过质量和身份检查后，写入永久锚点记忆。没有固定的 `sam_interval`。
 
-3. 非关键帧使用光流传播 mask。
+4. 相邻永久锚点之间分别从左、右锚点运行独立的前向和后向视频记忆传播，按置信度和时间距离融合概率，而不是对二值 mask 取交集。
 
-   若输入 bag 同时提供点云和相机/雷达位姿，流程会优先把 mask 内的静态 3D 点投影到
-   下一帧，并在该 mask 连通区域内快速补全稠密几何光流。该方法不假设目标是平面，对
-   无纹理的任意形状装配式构件也适用；点云覆盖不足时才使用 Farneback 回退。
-
-   使用 OpenCV Farneback 光流把上一帧 mask warp 到当前帧，降低 SAM 调用频率。
-
-4. 后续 SAM 分割会受光流先验约束。
-
-   参数：
-
-   ```yaml
-   sam_refine_margin_px: 12
-   ```
-
-   表示将光流传播得到的 mask 膨胀 12 像素，形成一个允许 SAM 结果出现的局部带状区域。SAM 输出后会与这个区域取交集，防止后续帧突然分到过大的背景区域。如果交集太小，则回退到光流传播结果。
+5. 前后向 IoU、连通域比例、孔洞比例、边界截断、图像质量及面积突变任一异常时，才触发 SAM3 恢复。LiDAR、位姿和点云不参与上述 mask 估计；它们仅在 mask 最终确定后用于点云提取。
 
 ### 点云过滤策略
 
@@ -436,24 +424,23 @@ python src/proxy_model/scripts/build_object_bag.py \
 
 ```text
 .proxy_model_cache/<scene>/overlays/
+.proxy_model_cache/<scene>/segmentation_metrics.csv
 .proxy_model_cache/<scene>/summary.json
 ```
 
-如果 mask 偏大，优先调整：
+如果 CSV 中大量出现 `low_fb_iou`、`recovery_failed` 或质量分数偏低，优先检查种子帧，随后调整：
 
 ```yaml
-sam_interval: 1       # 更频繁调用 SAM
-sam_refine_margin_px: 8
-mask_dilate_px: 0
-flow_mask_dilate_px: 0
+fb_iou_threshold: 0.60          # 放宽/收紧双向一致性判定
+quality_threshold: 0.60         # 锚点与恢复的最低质量
+max_anchor_memory: 8            # 增加代表性视角锚点上限
+max_recovery_frames: 80         # 单 bag 自动 SAM3 恢复预算
+min_component_area_px: 100      # 删除小碎片的最小面积
+max_hole_area_px: 400           # 只填充很小的封闭孔洞
 ```
 
-如果 mask 偏小，优先调整：
-
-```yaml
-sam_refine_margin_px: 16
-mask_dilate_px: 2
-```
+`probabilities/` 保存前景置信度，`disagreements/` 保存双向概率差异；后者在单向端部帧为空。若首帧
+SAM3 本身不正确，应改用清晰、无遮挡且构件完整可见的 `seed_frame`，而不是降低质量阈值。
 
 ### Step 3: object bag 转 COLMAP
 

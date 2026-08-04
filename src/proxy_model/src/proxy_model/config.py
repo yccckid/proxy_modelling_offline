@@ -55,20 +55,26 @@ class Qwen:
 class Segmentation:
     prompt: str
     seed_frame: int = 0
-    sam_interval: int = 5
     sam_agent_root: Path = Path("/home/yc/SAM-AGENT")
     checkpoint: Path = Path("/home/yc/SAM-AGENT/weights/sam3.pt")
     device: str = "cuda"
     confidence_threshold: float = 0.3
-    mask_dilate_px: int = 2
-    flow_mask_dilate_px: int = 0
-    geometry_flow_enabled: bool = True
-    geometry_flow_voxel_size_m: float = 0.03
-    geometry_flow_min_seed_points: int = 20
-    flow_smoothing_sigma_px: float = 4.0
-    flow_visual_min_magnitude_px: float = 0.5
-    sam_refine_margin_px: int = 12
     min_mask_area_px: int = 100
+    video_model_version: str = "sam3"
+    video_checkpoint: Path | None = None
+    video_compile: bool = False
+    mask_threshold: float = 0.5
+    fb_iou_threshold: float = 0.65
+    quality_threshold: float = 0.60
+    view_novelty_threshold: float = 0.32
+    min_anchor_time_gap_s: float = 2.0
+    max_anchor_memory: int = 8
+    max_working_memory: int = 7
+    max_recovery_frames: int = 80
+    recovery_prompt_min_confidence: float = 0.45
+    min_component_area_px: int = 100
+    max_hole_area_px: int = 400
+    allow_hole_filling: bool = True
     qwen: Qwen = field(default_factory=Qwen)
 
 
@@ -97,7 +103,8 @@ class Output:
     jpeg_quality: int = 95
     save_masks: bool = True
     save_overlays: bool = True
-    save_flows: bool = True
+    save_probabilities: bool = True
+    save_disagreements: bool = True
     save_labeled_pcd: bool = True
     save_point_images: bool = True
     overwrite: bool = False
@@ -163,28 +170,29 @@ def load_config(path: str | Path) -> AppConfig:
         segmentation=Segmentation(
             prompt=str(_required(seg_raw, "prompt")),
             seed_frame=int(seg_raw.get("seed_frame", 0)),
-            sam_interval=max(1, int(seg_raw.get("sam_interval", 5))),
             sam_agent_root=resolve(seg_raw.get("sam_agent_root", "/home/yc/SAM-AGENT")),
             checkpoint=resolve(seg_raw.get("checkpoint", "/home/yc/SAM-AGENT/weights/sam3.pt")),
             device=str(seg_raw.get("device", "cuda")),
             confidence_threshold=float(seg_raw.get("confidence_threshold", 0.3)),
-            mask_dilate_px=max(0, int(seg_raw.get("mask_dilate_px", 2))),
-            flow_mask_dilate_px=max(0, int(seg_raw.get("flow_mask_dilate_px", 0))),
-            geometry_flow_enabled=bool(seg_raw.get("geometry_flow_enabled", True)),
-            geometry_flow_voxel_size_m=max(
-                1e-3, float(seg_raw.get("geometry_flow_voxel_size_m", 0.03))
-            ),
-            geometry_flow_min_seed_points=max(
-                1, int(seg_raw.get("geometry_flow_min_seed_points", 20))
-            ),
-            flow_smoothing_sigma_px=max(
-                0.0, float(seg_raw.get("flow_smoothing_sigma_px", 4.0))
-            ),
-            flow_visual_min_magnitude_px=max(
-                0.0, float(seg_raw.get("flow_visual_min_magnitude_px", 0.5))
-            ),
-            sam_refine_margin_px=max(0, int(seg_raw.get("sam_refine_margin_px", 12))),
             min_mask_area_px=max(1, int(seg_raw.get("min_mask_area_px", 100))),
+            video_model_version=str(seg_raw.get("video_model_version", "sam3")),
+            video_checkpoint=(
+                resolve(seg_raw["video_checkpoint"])
+                if seg_raw.get("video_checkpoint") else None
+            ),
+            video_compile=bool(seg_raw.get("video_compile", False)),
+            mask_threshold=min(1.0, max(0.0, float(seg_raw.get("mask_threshold", 0.5)))),
+            fb_iou_threshold=min(1.0, max(0.0, float(seg_raw.get("fb_iou_threshold", 0.65)))),
+            quality_threshold=min(1.0, max(0.0, float(seg_raw.get("quality_threshold", 0.60)))),
+            view_novelty_threshold=max(0.0, float(seg_raw.get("view_novelty_threshold", 0.32))),
+            min_anchor_time_gap_s=max(0.0, float(seg_raw.get("min_anchor_time_gap_s", 2.0))),
+            max_anchor_memory=max(1, int(seg_raw.get("max_anchor_memory", 8))),
+            max_working_memory=max(1, int(seg_raw.get("max_working_memory", 7))),
+            max_recovery_frames=max(0, int(seg_raw.get("max_recovery_frames", 80))),
+            recovery_prompt_min_confidence=min(1.0, max(0.0, float(seg_raw.get("recovery_prompt_min_confidence", 0.45)))),
+            min_component_area_px=max(1, int(seg_raw.get("min_component_area_px", 100))),
+            max_hole_area_px=max(0, int(seg_raw.get("max_hole_area_px", 400))),
+            allow_hole_filling=bool(seg_raw.get("allow_hole_filling", True)),
             qwen=Qwen(
                 enabled=bool(qwen_raw.get("enabled", True)),
                 model=str(qwen_raw.get("model", "qwen3-vl-plus")),
@@ -229,7 +237,8 @@ def load_config(path: str | Path) -> AppConfig:
             jpeg_quality=int(output_raw.get("jpeg_quality", 95)),
             save_masks=bool(output_raw.get("save_masks", True)),
             save_overlays=bool(output_raw.get("save_overlays", True)),
-            save_flows=bool(output_raw.get("save_flows", True)),
+            save_probabilities=bool(output_raw.get("save_probabilities", True)),
+            save_disagreements=bool(output_raw.get("save_disagreements", True)),
             save_labeled_pcd=bool(output_raw.get("save_labeled_pcd", True)),
             save_point_images=bool(output_raw.get("save_point_images", True)),
             overwrite=bool(output_raw.get("overwrite", False)),
