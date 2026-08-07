@@ -75,6 +75,7 @@ class Sam3MemoryVOS:
         self._target = target
         self._mask_threshold = options.mask_threshold
         self.frame_times_s: list[float] = []
+        self.frame_elapsed_s: dict[int, float] = {}
         tracker = getattr(self._predictor.model, "tracker", None)
         native_capacity = int(getattr(tracker, "num_maskmem", options.max_working_memory))
         # SAM3 allocates positional embeddings at construction, so this adapter
@@ -139,6 +140,7 @@ class Sam3MemoryVOS:
                     elapsed_s=elapsed,
                 )
                 self.frame_times_s.append(elapsed)
+                self.frame_elapsed_s[frame_id] = self.frame_elapsed_s.get(frame_id, 0.0) + elapsed
             # The prompted frame is a trusted image-SAM anchor, not a VOS estimate.
             predictions[anchor.frame_id] = Prediction(
                 probability=anchor.mask.astype(np.float32), confidence=1.0, elapsed_s=0.0

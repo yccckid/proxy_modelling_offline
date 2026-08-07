@@ -80,6 +80,7 @@ class ObjectBagPipeline:
         self.anchor_novelty_by_id: dict[int, float] = {}
         self.vos: Sam3MemoryVOS | None = None
         self.vos_frame_times_s: list[float] = []
+        self.sam3_frame_times_s: dict[int, float] = {}
         self.working_memory_peak_frames = 0
         self.segmentation_elapsed_s = 0.0
 
@@ -214,9 +215,11 @@ class ObjectBagPipeline:
             f"center={self.target.center_point}"
         )
         sam = SamSegmenter(self.config.segmentation)
+        sam3_started = time.perf_counter()
         seed_mask, seed_confidence = sam.predict_with_confidence(
             seed_image, self.target, self.target.center_point
         )
+        self.sam3_frame_times_s[seed] = time.perf_counter() - sam3_started
         self.sam3_calls += 1
         seed_anchor = self._make_anchor(seed, seed_image, seed_mask, seed_confidence, "sam3_seed")
         if seed_anchor is None:
@@ -433,12 +436,19 @@ class ObjectBagPipeline:
         else:
             y, x = np.unravel_index(int(np.argmax(probability)), probability.shape)
             point = (int(x), int(y))
+        sam3_started = time.perf_counter()
         try:
             mask, sam_confidence = sam.predict_with_confidence(self._read_frame(index), self.target, point)
             self.sam3_calls += 1
         except Exception as error:
+            self.sam3_frame_times_s[index] = self.sam3_frame_times_s.get(index, 0.0) + (
+                time.perf_counter() - sam3_started
+            )
             print(f"\nWarning: SAM3 recovery failed at frame {index}: {error}")
             return None
+        self.sam3_frame_times_s[index] = self.sam3_frame_times_s.get(index, 0.0) + (
+            time.perf_counter() - sam3_started
+        )
         return self._make_anchor(index, self._read_frame(index), mask, sam_confidence, source)
 
     def _make_anchor(
@@ -500,6 +510,9 @@ class ObjectBagPipeline:
                 if not cv2.imwrite(str(path), np.rint(np.clip(disagreement, 0.0, 1.0) * 255).astype(np.uint8)):
                     raise RuntimeError(f"Failed to save forward/backward disagreement map: {path}")
                 disagreement_path = str(path)
+            vos_elapsed_s = float(entry["vos_elapsed_s"])
+            vos_total_elapsed_s = self.vos.frame_elapsed_s.get(index, vos_elapsed_s) if self.vos else vos_elapsed_s
+            sam3_elapsed_s = self.sam3_frame_times_s.get(index, 0.0)
             self.segmentation_rows.append(
                 {
                     "frame_id": index,
@@ -525,7 +538,10 @@ class ObjectBagPipeline:
                     "nearest_anchor_ids": entry["anchor_ids"],
                     "is_permanent_anchor": any(a.frame_id == index for a in self.permanent_anchors),
                     "failure_flags": str(entry["failure_flags"]).strip("|"),
-                    "vos_elapsed_s": entry["vos_elapsed_s"],
+                    "vos_elapsed_s": vos_elapsed_s,
+                    "vos_total_elapsed_s": vos_total_elapsed_s,
+                    "sam3_elapsed_s": sam3_elapsed_s,
+                    "segmentation_elapsed_s": vos_total_elapsed_s + sam3_elapsed_s,
                     "sam3_called": str(entry["source"]).startswith("sam3"),
                     "sam3_recovery": entry["source"] == "sam3_recovery",
                     "ground_truth_mask_path": "",
@@ -679,17 +695,7 @@ class ObjectBagPipeline:
                             self.config.point_filter.min_depth_m,
                             self.config.point_filter.max_depth_m,
                         )
-                        object_labeled_points += int(object_labels.sum())
                         export_name = f"{point_count:06d}"
-                        if self.config.output.save_labeled_pcd:
-                            transform_world_lidar = pose_matrix(lidar_pose.message)
-                            points_world = transform_points(points, transform_world_lidar)
-                            write_labeled_pcd(
-                                self.labeled_pcd_dir / f"{export_name}.pcd",
-                                points_world,
-                                object_labels,
-                            )
-                            labeled_pcd_count += 1
                         if self.config.output.save_point_images:
                             overlay_path = self.overlays_dir / f"{index:06d}.jpg"
                             overlay = cv2.imread(str(overlay_path), cv2.IMREAD_COLOR)
@@ -711,6 +717,16 @@ class ObjectBagPipeline:
                         )
                         keep &= self._multiview_keep(points, index, lidar_pose.message)
                         keep = largest_cluster_keep(points, keep, self.config.point_filter)
+                        object_labeled_points += int(keep.sum())
+                        if self.config.output.save_labeled_pcd:
+                            transform_world_lidar = pose_matrix(lidar_pose.message)
+                            points_world = transform_points(points, transform_world_lidar)
+                            write_labeled_pcd(
+                                self.labeled_pcd_dir / f"{export_name}.pcd",
+                                points_world,
+                                keep,
+                            )
+                            labeled_pcd_count += 1
                     output_points += int(keep.sum())
                     destination.write(topic, filter_pointcloud(message, keep), bag_time)
                     point_count += 1

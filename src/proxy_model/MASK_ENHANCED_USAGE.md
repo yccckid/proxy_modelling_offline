@@ -247,13 +247,13 @@ python src/GS-SDF/scripts/rosbag_convert/rosbag_to_colmap.py \
 
 ```bash
 python src/GS-SDF/scripts/rosbag_convert/rosbag_to_colmap.py \
-  --bag_path src/GS-SDF/data/my_bag/data_0718_v1/my_data_v1_syn_object.bag \
+  --bag_path src/GS-SDF/data/my_bag/data_0729_fengxian/my_data_v4_syn_object.bag \
   --image_topic /origin_img/compressed \
   --image_pose_topic /aft_mapped_to_init_cam \
   --mask_topic /proxy_model/object_mask \
   --point_topic /cloud_registered_body \
   --point_pose_topic /aft_mapped_to_init_lidar \
-  --output_dir src/GS-SDF/data/my_bag/data_0718_v1 \
+  --output_dir src/GS-SDF/data/my_bag/data_0729_fengxian \
   --fx 1294.2997611696601 \
   --fy 1293.8035067346466 \
   --cx 625.69717868846817 \

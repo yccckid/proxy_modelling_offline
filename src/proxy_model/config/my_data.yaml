@@ -77,7 +77,7 @@ point_filter:
   keep_largest_cluster: true
 
 output:
-  cache_dir: ../../../.proxy_model_cache/my_data_0729_v3
+  cache_dir: ../../../.proxy_model_cache/my_data_0729_v4
   jpeg_quality: 95
   save_masks: true
   save_overlays: true
